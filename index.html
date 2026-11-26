@@ -106,6 +106,11 @@ details ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
 .hud-sum span { display: block; font-size: 11px; color: #A9B8AF; white-space: nowrap; }
 .hud-sum b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; white-space: nowrap; }
 .hud-sum b.bad { color: #FF6E6E; } .hud-sum b.ok { color: #6CF0A0; }
+.hud-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chipc, .chipb { background: rgba(10,14,12,0.8); color: #F1F5F2; border-radius: 999px; padding: 6px 11px; font-size: 12.5px; line-height: 1.3; border: 0; }
+.chipc { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.chipc i { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: 0 0 0 1.5px #fff; }
+.chipb { font-weight: 600; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); min-height: 30px; }
 .hud-btns { display: flex; gap: 8px; align-items: stretch; }
 .hbtn { flex: 1 1 0; min-width: 0; border: 0; border-radius: 12px; background: rgba(10,14,12,0.82); color: #F1F5F2; font-size: 14px; font-weight: 600; padding: 10px 8px; min-height: 52px; cursor: pointer; line-height: 1.2; }
 .hbtn.main { flex: 1.5 1 0; background: #F5C431; color: #1E1A08; font-size: 16px; }
@@ -160,7 +165,7 @@ details ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
       </label>
     </div>
     <div>
-      <p class="note" style="margin-bottom:6px">자동 인식할 말뚝·꽃심 색</p>
+      <p class="note" style="margin-bottom:6px">자동 인식할 말뚝·꽃심 색. 목록에 없는 색(나무색, 흰색 등)은 측정 화면에서 말뚝을 눌러 알려 주세요.</p>
       <div class="swatches" id="swatches"></div>
     </div>
     <div class="row">
@@ -231,6 +236,10 @@ details ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
   <canvas id="lvCanvas"></canvas>
   <div class="hud-top"><div class="pillmsg wait" id="lvMsg">카메라를 켜는 중…</div></div>
   <div class="hud-bottom">
+    <div class="hud-chips">
+      <span class="chipc"><i id="lvSw"></i><span id="lvColor">주황</span> · 말뚝을 누르면 그 색으로 찾습니다</span>
+      <button class="chipb" id="lvSens">인식 범위 보통</button>
+    </div>
     <div class="hud-sum">
       <div><span>말뚝</span><b id="lvN">0</b></div>
       <div><span>평균 cm</span><b id="lvMean">–</b></div>
@@ -250,6 +259,11 @@ details ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
   <canvas id="arCanvas"></canvas>
   <div class="hud-top"><div class="pillmsg wait" id="arMsg">폰을 천천히 움직여 바닥을 비춰 주세요.</div></div>
   <div class="hud-bottom" id="arHud">
+    <div class="hud-chips" id="arChips" hidden>
+      <span class="chipc"><i id="arSw"></i><span id="arColor">주황</span> 을 찾는 중</span>
+      <button class="chipb" id="arPick">가운데 색으로 찾기</button>
+      <button class="chipb" id="arSens">인식 범위 보통</button>
+    </div>
     <div class="hud-sum">
       <div><span>점</span><b id="arN">0</b></div>
       <div><span>평균 cm</span><b id="arMean">–</b></div>
@@ -286,7 +300,7 @@ const REFS = [
 ];
 const S = {
   target: 30, tol: 2, order: 'line',
-  det: { color: 'orange', hueTol: 18, satMin: 50 },
+  det: { color: 'orange', hueTol: 18, satMin: 45, custom: null, sens: 1 },
   ref: { id: 'a4', w: 29.7, h: 21 },
   results: [], source: '',
 };
@@ -298,6 +312,7 @@ try {
     if (typeof o.tol === 'number') S.tol = o.tol;
     if (o.order) S.order = o.order;
     if (o.det) Object.assign(S.det, o.det);
+    if (!(S.det.sens >= 0 && S.det.sens <= 2)) S.det.sens = 1;
     if (o.ref) Object.assign(S.ref, o.ref);
   }
 } catch (e) { /* ignore */ }
@@ -346,6 +361,24 @@ function pip(pt, poly) {
   return inside;
 }
 function hueDist(a, b) { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
+function rgb2hsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d) { if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4; h *= 60; if (h < 0) h += 360; }
+  return { h, s: mx ? d / mx : 0, v: mx };
+}
+const SENS = [{ k: 0.7, label: '좁게' }, { k: 1, label: '보통' }, { k: 1.45, label: '넓게' }];
+/* Average colour of a small patch of an RGBA buffer, as the colour to look for. */
+function learnColor(d, w, h, x, y) {
+  const r = 3; let R = 0, G = 0, B = 0, n = 0;
+  for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++) for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) { const j = (yy * w + xx) * 4; R += d[j]; G += d[j + 1]; B += d[j + 2]; n++; }
+  if (!n) return null;
+  R /= n; G /= n; B /= n;
+  return Object.assign(rgb2hsv(R, G, B), { css: `rgb(${R | 0},${G | 0},${B | 0})` });
+}
+function colorName() { const d = S.det; return d.color === 'custom' && d.custom ? '찍은 색' : (PRESETS.find(x => x.id === d.color) || PRESETS[0]).label; }
+function colorCss() { const d = S.det; return d.color === 'custom' && d.custom ? d.custom.css : (PRESETS.find(x => x.id === d.color) || PRESETS[0]).sw; }
 // 4x4, column-major (WebXR / WebGL layout)
 function mul4(a, b) {
   const o = new Float32Array(16);
@@ -396,18 +429,23 @@ function boxOp(m, w, h, r, isMax) {
 function buildMasks(d, w, h, wantPaper) {
   const n = w * h, mk = new Uint8Array(n), V = wantPaper ? new Uint8Array(n) : null, Sa = wantPaper ? new Uint8Array(n) : null;
   const hist = wantPaper ? new Uint32Array(256) : null;
-  const p = PRESETS.find(x => x.id === S.det.color) || PRESETS[0], tol = S.det.hueTol, satMin = S.det.satMin / 100, hue = p.hue;
+  const det = S.det, sens = SENS[det.sens] ? SENS[det.sens].k : 1, cu = det.color === 'custom' ? det.custom : null;
+  const p = PRESETS.find(x => x.id === det.color) || PRESETS[0], tol = det.hueTol * sens, satMin = clamp(det.satMin / 100 / sens, 0.15, 0.9), hue = p.hue;
+  const sT = 0.2 * sens, vT = 0.22 * sens, hT = cu ? (cu.s < 0.3 ? 30 : 18) * sens : 0;
   for (let i = 0, j = 0; i < n; i++, j += 4) {
     const r = d[j], g = d[j + 1], b = d[j + 2];
     const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b), dd = mx - mn;
     const s = mx ? dd / mx : 0;
     if (wantPaper) { V[i] = mx; Sa[i] = s * 255; hist[mx]++; }
-    if (s >= satMin && mx >= 76) {
-      let hh;
-      if (mx === r) hh = ((g - b) / dd) % 6; else if (mx === g) hh = (b - r) / dd + 2; else hh = (r - g) / dd + 4;
-      hh *= 60; if (hh < 0) hh += 360;
-      if (hueDist(hh, hue) <= tol) mk[i] = 1;
-    }
+    if (cu) { // learned colour: match saturation and brightness too, so wood can be told from soil
+      if (Math.abs(s - cu.s) > sT || Math.abs(mx / 255 - cu.v) > vT) continue;
+      if (cu.s < 0.15) { mk[i] = 1; continue; }
+      if (!dd) continue;
+    } else if (!(s >= satMin && mx >= 76)) continue;
+    let hh;
+    if (mx === r) hh = ((g - b) / dd) % 6; else if (mx === g) hh = (b - r) / dd + 2; else hh = (r - g) / dd + 4;
+    hh *= 60; if (hh < 0) hh += 360;
+    if (hueDist(hh, cu ? cu.h : hue) <= (cu ? hT : tol)) mk[i] = 1;
   }
   let paper = null;
   if (wantPaper) {
@@ -779,7 +817,7 @@ function processLive() {
     for (const t of L.tracks) if (!t.hit) t.miss++;
     L.tracks = L.tracks.filter(t => t.miss <= 7);
   }
-  L.rawCount = dets.length;
+  L.rawCount = dets.length; L.raw = dets.map(p => [p.x / k, p.y / k]);
 }
 function longFirst(q) {
   const e = (i) => hyp(q[(i + 1) % 4][0] - q[i][0], q[(i + 1) % 4][1] - q[i][1]);
@@ -794,6 +832,13 @@ function drawLive() {
   const toS = (x, y) => [x * sc + ox, y * sc + oy]; // video pixels to screen
   const vis = L.tracks.filter(t => t.age >= 3);
   L.R = compute(vis.map(t => ({ X: t.X, Y: t.Y, Z: 0 })));
+  L.map = { sc, ox, oy };
+  $('lvSw').style.background = colorCss(); $('lvColor').textContent = colorName(); $('lvSens').textContent = `인식 범위 ${SENS[S.det.sens].label}`;
+  for (const p of (L.raw || [])) { // everything that matches the colour right now, measured or not
+    const [x, y] = toS(p[0], p[1]);
+    g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 5; g.beginPath(); g.arc(x, y, 10, 0, 6.2832); g.stroke();
+    g.strokeStyle = '#fff'; g.lineWidth = 2; g.setLineDash([4, 4]); g.beginPath(); g.arc(x, y, 10, 0, 6.2832); g.stroke(); g.setLineDash([]);
+  }
   if (L.quad && L.Mi) {
     const r = refDims();
     // ground grid
@@ -824,14 +869,28 @@ function drawLive() {
     drawChain(g, L.R, pts);
     msg.className = 'pillmsg good';
     msg.textContent = L.frozen ? '멈춘 화면입니다. 계속하려면 ‘계속’을 누르세요.'
-      : vis.length ? `기준 용지와 말뚝 ${vis.length}개를 찾았어요.` : '기준 용지를 찾았어요. 말뚝이 화면에 들어오게 비춰 주세요.';
+      : vis.length ? `기준 용지와 말뚝 ${vis.length}개를 찾았어요.` : '기준 용지를 찾았어요. 말뚝이 안 잡히면 화면에서 말뚝을 눌러 주세요.';
   } else {
     msg.className = 'pillmsg wait';
-    msg.textContent = L.rawCount ? `말뚝 후보 ${L.rawCount}개가 보여요. 흰 기준 용지가 통째로 화면에 들어오게 해 주세요.` : '흰 기준 용지와 말뚝이 함께 보이게 비춰 주세요.';
+    msg.textContent = L.rawCount ? `말뚝 후보 ${L.rawCount}개(점선 원)가 보여요. 흰 기준 용지가 통째로 화면에 들어오게 해 주세요.` : '말뚝이 안 잡히면 화면에서 말뚝을 눌러 색을 알려 주세요.';
   }
   hudSum('lv', L.R, vis.length);
 }
 $('btnLive').onclick = startLive;
+L.cv.addEventListener('click', (e) => {
+  if (!L.map || !L.work.width) return;
+  const r = L.cv.getBoundingClientRect();
+  const wx = Math.round((e.clientX - r.left - L.map.ox) / L.map.sc * L.k), wy = Math.round((e.clientY - r.top - L.map.oy) / L.map.sc * L.k);
+  if (wx < 0 || wy < 0 || wx >= L.work.width || wy >= L.work.height) return;
+  const wg = L.work.getContext('2d', { willReadFrequently: true });
+  const c = learnColor(wg.getImageData(0, 0, L.work.width, L.work.height).data, L.work.width, L.work.height, wx, wy);
+  if (!c) return;
+  S.det.custom = c; S.det.color = 'custom'; save(); buildSwatches(); L.tracks = [];
+  toast('누른 곳의 색으로 말뚝을 찾습니다.');
+  if (L.frozen) processLive();
+});
+function cycleSens() { S.det.sens = (S.det.sens + 1) % SENS.length; save(); L.tracks = []; if (L.frozen && L.running) processLive(); }
+$('lvSens').onclick = cycleSens;
 $('lvExit').onclick = stopLive;
 $('lvFreeze').onclick = () => {
   L.frozen = !L.frozen;
@@ -884,7 +943,8 @@ async function startAR() {
   A.binding = null; A.prog = null; A.fbo = null;
   if (A.cam) { try { A.binding = new XRWebGLBinding(session, gl); } catch (e) { A.cam = false; } }
   A.session = session; A.gl = gl; A.points = []; A.cands = []; A.reticle = null; A.plane = null; A.lastDet = 0;
-  $('arAuto').hidden = !A.cam; $('page').hidden = true;
+  $('arAuto').hidden = !A.cam; $('arChips').hidden = !A.cam; $('page').hidden = true;
+  if (!A.cam) toast('이 폰은 AR 중 자동 인식을 지원하지 않아요. 원을 말뚝 밑동에 맞추고 직접 찍어 주세요.');
   session.addEventListener('select', (e) => placeAtReticle(e.frame));
   session.addEventListener('end', endAR);
   session.requestAnimationFrame(arFrame);
@@ -910,13 +970,13 @@ function placeAtReticle(frame) {
   if (!A.reticle) { toast('바닥을 아직 찾지 못했어요. 폰을 조금 더 움직여 주세요.'); return; }
   addPoint(A.reticle.pos, frame);
 }
-let pendingAdd = false, pendingAuto = false;
+let pendingAdd = false, pendingAuto = false, pendingPick = false;
 function arFrame(t, frame) {
   const session = A.session; if (!session) return;
   session.requestAnimationFrame(arFrame);
   const gl = A.gl, pose = frame.getViewerPose(A.ref);
   const view = pose && pose.views[0];
-  if (view && A.cam && A.plane && t - A.lastDet > 320) { A.lastDet = t; try { arCamDetect(view); } catch (e) { A.cam = false; $('arAuto').hidden = true; } }
+  if (view && A.cam && A.plane && t - A.lastDet > 320) { A.lastDet = t; try { arCamDetect(view); } catch (e) { A.cam = false; $('arAuto').hidden = true; $('arChips').hidden = true; } }
   gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
   gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   if (!view) { drawAR(null); return; }
@@ -972,6 +1032,11 @@ function arCamDetect(view) {
   gl.readPixels(0, 0, dw, dh, gl.RGBA, gl.UNSIGNED_BYTE, A.px);
   gl.bindTexture(gl.TEXTURE_2D, null);
   for (let y = 0; y < dh; y++) A.img.set(A.px.subarray((dh - 1 - y) * dw * 4, (dh - y) * dw * 4), y * dw * 4); // top row first
+  if (pendingPick) {
+    pendingPick = false;
+    const c = learnColor(A.img, dw, dh, dw >> 1, dh >> 1);
+    if (c) { S.det.custom = c; S.det.color = 'custom'; save(); toast('화면 가운데 색으로 말뚝을 찾습니다.'); }
+  }
   const { mk } = buildMasks(A.img, dw, dh, false);
   const dets = findStakes(mk, dw, dh, 3, null);
   const inv = inv4(mul4(view.projectionMatrix, view.transform.inverse.matrix));
@@ -1027,12 +1092,15 @@ function drawAR(view) {
     msg.className = 'pillmsg good';
     msg.textContent = A.points.length ? '다음 말뚝 밑동에 원을 맞추고 화면을 누르세요. 숫자는 마지막 점부터의 거리입니다.' : '원을 첫 말뚝이 땅에 닿는 곳에 맞추고 화면을 누르세요.';
   } else { msg.className = 'pillmsg wait'; msg.textContent = '폰을 천천히 움직여 바닥을 비춰 주세요.'; }
+  $('arSw').style.background = colorCss(); $('arColor').textContent = colorName(); $('arSens').textContent = `인식 범위 ${SENS[S.det.sens].label}`;
   hudSum('ar', A.R, A.points.length);
 }
 $('btnAR').onclick = startAR;
 $('arHud').addEventListener('beforexrselect', (e) => e.preventDefault()); // buttons must not also place a point
 $('arAdd').onclick = () => { pendingAdd = true; };
 $('arAuto').onclick = () => { pendingAuto = true; };
+$('arPick').onclick = () => { pendingPick = true; };
+$('arSens').onclick = () => { S.det.sens = (S.det.sens + 1) % SENS.length; save(); };
 $('arUndo').onclick = () => { const p = A.points.pop(); if (p && p.anchor && p.anchor.delete) p.anchor.delete(); };
 $('arExit').onclick = () => { if (A.session) A.session.end().catch(() => endAR()); else endAR(); };
 
@@ -1047,6 +1115,13 @@ function buildSwatches() {
     b.onclick = () => { S.det.color = p.id; save(); buildSwatches(); };
     box.appendChild(b);
   });
+  if (S.det.custom) {
+    const b = document.createElement('button'); b.className = 'sw'; b.type = 'button';
+    const i = document.createElement('i'); i.style.background = S.det.custom.css; b.appendChild(i); b.appendChild(document.createTextNode('화면에서 찍은 색'));
+    setPressed(b, S.det.color === 'custom');
+    b.onclick = () => { S.det.color = 'custom'; save(); buildSwatches(); };
+    box.appendChild(b);
+  }
 }
 function renderMain() {
   const R = compute(S.results), st = R.stats;
