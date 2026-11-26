@@ -1,0 +1,1114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101613">
+<title>말뚝 간격 측정기 · 실시간</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: a short start page (two measuring modes, settings, last result) plus two full-screen
+   measuring layers: the WebXR AR overlay and the live camera view. */
+:root {
+  --bg: #EDF0EB; --surface: #FFFFFF; --sunk: #E1E6DF; --fg: #1B2520; --muted: #5A6961; --line: #C9D1CA;
+  --accent: #F2B705; --accent-ink: #1E1A08; --cal: #0B8C98; --ok: #23804F; --bad: #C93C3C;
+  --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F1512; --surface: #17201B; --sunk: #0B100D; --fg: #E3EBE5; --muted: #93A49A; --line: #2A3730;
+    --accent: #F5C431; --cal: #2BC2CE; --ok: #4CC38A; --bad: #FF7070; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.5; -webkit-text-size-adjust: 100%; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2.5px solid var(--cal); outline-offset: 2px; }
+
+.page {
+  max-width: 720px; margin: 0 auto; display: grid; gap: 14px;
+  padding-block: calc(16px + env(safe-area-inset-top, 0px)) calc(28px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+header h1 { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+header p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+.mark { width: 24px; height: 24px; flex: none; }
+.warn { background: color-mix(in srgb, var(--bad) 14%, var(--surface)); border: 1px solid var(--bad); border-radius: var(--r); padding: 10px 12px; font-size: 14px; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 12px; }
+.card h2 { margin: 0; font-size: 15px; font-weight: 700; }
+.modes { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.mode { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 8px; align-content: start; }
+.mode h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.mode p { margin: 0; font-size: 13.5px; color: var(--muted); }
+.mode .state { font-size: 12.5px; font-weight: 600; }
+.mode .state.ok { color: var(--ok); }
+.mode .state.no { color: var(--bad); }
+
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 10px 14px; border-radius: 10px; font-size: 14.5px; font-weight: 600; cursor: pointer; min-height: 44px; line-height: 1.2; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.small { min-height: 36px; padding: 6px 11px; font-size: 13px; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row > * { min-width: 0; }
+.note { margin: 0; font-size: 13px; color: var(--muted); }
+.field { display: grid; gap: 4px; font-size: 13px; color: var(--muted); flex: 1 1 130px; }
+.field .inp { display: flex; align-items: center; gap: 6px; }
+.field input, .field select { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font-size: 15px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.field select { font-family: var(--font-body); }
+.unit { color: var(--muted); font-size: 13px; flex: none; }
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.sw { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); padding: 5px 10px 5px 6px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.sw i { width: 18px; height: 18px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.25); }
+.sw[aria-pressed="true"] { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; background: var(--sunk); border-radius: 9px; padding: 3px; gap: 3px; }
+.seg button { border: 0; background: transparent; padding: 7px 8px; border-radius: 7px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,0.12); }
+
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.stats div { background: var(--surface); padding: 7px 9px; min-width: 0; }
+.stats span { display: block; font-size: 11.5px; color: var(--muted); }
+.stats b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14.5px; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { padding: 6px 10px; text-align: right; white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--sunk); }
+th:first-child, td:first-child { text-align: left; }
+td { font-family: var(--font-mono); font-variant-numeric: tabular-nums; border-top: 1px solid var(--line); }
+tr.bad td { color: var(--bad); }
+tr.bad td:last-child::before { content: "● "; }
+tr.ok td:last-child { color: var(--ok); }
+.empty { padding: 14px; color: var(--muted); font-size: 13px; text-align: center; white-space: normal; font-family: var(--font-body); }
+textarea#copyFallback { width: 100%; min-height: 120px; font-family: var(--font-mono); font-size: 12.5px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+details { font-size: 13.5px; color: var(--muted); }
+details summary { cursor: pointer; font-weight: 600; color: var(--fg); }
+details ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
+
+/* full-screen measuring layers (always dark: they sit on a camera picture) */
+.layer { position: fixed; inset: 0; z-index: 30; background: #000; color: #F1F5F2; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+#arLayer { background: transparent; }
+.layer video, .layer canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.layer video { object-fit: cover; }
+.hud-top { position: absolute; left: 0; right: 0; top: 0; padding: calc(10px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); display: grid; gap: 8px; justify-items: start; pointer-events: none; }
+.pillmsg { background: rgba(10,14,12,0.8); padding: 7px 12px; border-radius: 14px; font-size: 14px; line-height: 1.35; max-width: 100%; }
+.pillmsg.good { box-shadow: inset 0 0 0 1.5px #6CF0A0; }
+.pillmsg.wait { box-shadow: inset 0 0 0 1.5px #FFD43B; }
+.hud-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 0 max(12px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); display: grid; gap: 8px; }
+.hud-sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); background: rgba(10,14,12,0.8); border-radius: 12px; overflow: hidden; }
+.hud-sum div { padding: 6px 9px; min-width: 0; }
+.hud-sum div + div { border-left: 1px solid rgba(255,255,255,0.14); }
+.hud-sum span { display: block; font-size: 11px; color: #A9B8AF; white-space: nowrap; }
+.hud-sum b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.hud-sum b.bad { color: #FF6E6E; } .hud-sum b.ok { color: #6CF0A0; }
+.hud-btns { display: flex; gap: 8px; align-items: stretch; }
+.hbtn { flex: 1 1 0; min-width: 0; border: 0; border-radius: 12px; background: rgba(10,14,12,0.82); color: #F1F5F2; font-size: 14px; font-weight: 600; padding: 10px 8px; min-height: 52px; cursor: pointer; line-height: 1.2; }
+.hbtn.main { flex: 1.5 1 0; background: #F5C431; color: #1E1A08; font-size: 16px; }
+.hbtn.exit { flex: 0 0 auto; padding-inline: 14px; }
+.hbtn:disabled { opacity: 0.45; }
+
+.toast { position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); background: #F1F5F2; color: #111; padding: 9px 16px; border-radius: 10px; font-size: 14px; max-width: calc(100% - 32px); z-index: 60; box-shadow: 0 6px 20px rgba(0,0,0,0.35); }
+</style>
+</head>
+<body>
+<div class="page" id="page">
+  <header>
+    <h1>
+      <svg class="mark" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="4" width="3" height="13" rx="1" fill="var(--accent)"/>
+        <rect x="18" y="4" width="3" height="13" rx="1" fill="var(--accent)"/>
+        <path d="M4.5 20.5h15M4.5 18.5v4M19.5 18.5v4" stroke="var(--fg)" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      </svg>
+      말뚝 간격 측정기 · 실시간
+    </h1>
+    <p>카메라를 비추면서 말뚝·꽃심 사이 간격을 바로 잽니다.</p>
+  </header>
+
+  <div class="warn" id="insecure" hidden>이 페이지는 <b>https://</b> 주소로 열어야 카메라를 쓸 수 있습니다. 파일을 직접 열거나 http 주소로 열면 측정이 시작되지 않습니다.</div>
+
+  <section class="card">
+    <h2>측정 방법</h2>
+    <div class="modes">
+      <div class="mode">
+        <h3>AR 측정</h3>
+        <p>기준 물체 없이 폰이 바닥을 인식합니다. 가운데 원을 말뚝 밑동에 맞추고 화면을 누르면 점이 찍히고, 다음 말뚝까지 거리가 바로 보입니다.</p>
+        <span class="state" id="arState">지원 여부 확인 중…</span>
+        <button class="btn primary" id="btnAR" disabled>AR 측정 시작</button>
+      </div>
+      <div class="mode">
+        <h3>실시간 카메라 측정</h3>
+        <p>바닥에 놓은 기준 용지와 말뚝을 화면에서 자동으로 찾아 간격을 계속 표시합니다. iPhone·iPad를 포함해 카메라가 있는 기기에서 됩니다.</p>
+        <span class="state" id="lvState"></span>
+        <button class="btn primary" id="btnLive">카메라 측정 시작</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>설정</h2>
+    <div class="row">
+      <label class="field">목표 간격
+        <span class="inp"><input id="tgt" type="number" inputmode="decimal" step="0.5" min="0"><span class="unit">cm</span></span>
+      </label>
+      <label class="field">허용 오차 ±
+        <span class="inp"><input id="tol" type="number" inputmode="decimal" step="0.5" min="0"><span class="unit">cm</span></span>
+      </label>
+    </div>
+    <div>
+      <p class="note" style="margin-bottom:6px">자동 인식할 말뚝·꽃심 색</p>
+      <div class="swatches" id="swatches"></div>
+    </div>
+    <div class="row">
+      <label class="field" style="flex-basis:100%">기준 물체 (실시간 카메라 측정용, 흰색)
+        <select id="refSel"></select>
+      </label>
+      <label class="field">긴 변
+        <span class="inp"><input id="refW" type="number" inputmode="decimal" step="0.1" min="1"><span class="unit">cm</span></span>
+      </label>
+      <label class="field">짧은 변
+        <span class="inp"><input id="refH" type="number" inputmode="decimal" step="0.1" min="1"><span class="unit">cm</span></span>
+      </label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2 id="resTitle">측정 결과</h2>
+    <div class="seg" role="group" aria-label="잇는 순서">
+      <button id="oLine" aria-pressed="true">일직선 줄</button>
+      <button id="oPath" aria-pressed="false">가까운 점끼리</button>
+    </div>
+    <div class="stats">
+      <div><span>평균</span><b id="stMean">–</b></div>
+      <div><span>표준편차</span><b id="stSd">–</b></div>
+      <div><span>전체 길이</span><b id="stTotal">–</b></div>
+      <div><span>최소</span><b id="stMin">–</b></div>
+      <div><span>최대</span><b id="stMax">–</b></div>
+      <div><span>줄에서 벗어남</span><b id="stDev">–</b></div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>구간</th><th>간격</th><th>목표와 차이</th><th>판정</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="row">
+      <button class="btn small" id="btnCopy">결과 복사</button>
+      <button class="btn small" id="btnCsv">CSV 저장</button>
+    </div>
+    <textarea id="copyFallback" hidden readonly></textarea>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>AR 측정을 잘 하려면</summary>
+      <ul>
+        <li>Android 폰의 Chrome에서 됩니다(Google Play AR 서비스 필요). iPhone·iPad의 Safari는 이 방식을 지원하지 않으니 실시간 카메라 측정을 쓰세요.</li>
+        <li>시작한 뒤 폰을 천천히 좌우로 움직여 바닥을 인식시키세요. 밝고 무늬가 있는 바닥일수록 잘 잡힙니다.</li>
+        <li>원을 말뚝이 땅에 닿는 곳에 맞추고, 너무 멀리서(3 m 이상) 찍지 마세요. 가까이서 찍을수록 정확합니다.</li>
+        <li>보통 1 m에 1~2 cm 정도 오차가 납니다. 중요한 구간은 줄자로 확인하세요.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>실시간 카메라 측정을 잘 하려면</summary>
+      <ul>
+        <li>흰 용지를 말뚝 줄 가까이, 같은 바닥에 평평하게 놓으세요. 긴 변이 말뚝 줄과 나란하면 가로·세로가 바르게 잡힙니다.</li>
+        <li>용지가 통째로 화면에 들어와야 합니다. 바닥이 밝은 콘크리트면 용지를 못 찾을 수 있습니다.</li>
+        <li>간격이 이상하면 '가로·세로 바꾸기'를 눌러 보세요.</li>
+        <li>'멈춤'을 누르면 화면과 숫자가 고정됩니다.</li>
+      </ul>
+    </details>
+  </section>
+</div>
+
+<!-- live camera layer -->
+<div class="layer" id="lvLayer" hidden>
+  <video id="lvVideo" playsinline muted autoplay></video>
+  <canvas id="lvCanvas"></canvas>
+  <div class="hud-top"><div class="pillmsg wait" id="lvMsg">카메라를 켜는 중…</div></div>
+  <div class="hud-bottom">
+    <div class="hud-sum">
+      <div><span>말뚝</span><b id="lvN">0</b></div>
+      <div><span>평균 cm</span><b id="lvMean">–</b></div>
+      <div><span>최소~최대</span><b id="lvRange">–</b></div>
+      <div><span>벗어남</span><b id="lvBad">–</b></div>
+    </div>
+    <div class="hud-btns">
+      <button class="hbtn main" id="lvFreeze">멈춤</button>
+      <button class="hbtn" id="lvSwap">가로·세로 바꾸기</button>
+      <button class="hbtn exit" id="lvExit">끝내기</button>
+    </div>
+  </div>
+</div>
+
+<!-- AR overlay (WebXR DOM overlay root) -->
+<div class="layer" id="arLayer" hidden>
+  <canvas id="arCanvas"></canvas>
+  <div class="hud-top"><div class="pillmsg wait" id="arMsg">폰을 천천히 움직여 바닥을 비춰 주세요.</div></div>
+  <div class="hud-bottom" id="arHud">
+    <div class="hud-sum">
+      <div><span>점</span><b id="arN">0</b></div>
+      <div><span>평균 cm</span><b id="arMean">–</b></div>
+      <div><span>최소~최대</span><b id="arRange">–</b></div>
+      <div><span>벗어남</span><b id="arBad">–</b></div>
+    </div>
+    <div class="hud-btns">
+      <button class="hbtn" id="arUndo">되돌리기</button>
+      <button class="hbtn main" id="arAdd">점 찍기</button>
+      <button class="hbtn" id="arAuto" hidden>인식된 0개 추가</button>
+      <button class="hbtn exit" id="arExit">끝내기</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(() => {
+'use strict';
+const $ = (id) => document.getElementById(id);
+const PRESETS = [
+  { id: 'orange', label: '주황', hue: 24, sw: '#F07A1A' },
+  { id: 'red', label: '빨강', hue: 355, sw: '#E02D2D' },
+  { id: 'pink', label: '분홍', hue: 325, sw: '#EC4FA7' },
+  { id: 'yellow', label: '노랑', hue: 52, sw: '#F2D21B' },
+  { id: 'blue', label: '파랑', hue: 212, sw: '#2F7BEA' },
+];
+const REFS = [
+  { id: 'a4', label: 'A4 용지 (29.7 × 21 cm)', w: 29.7, h: 21 },
+  { id: 'a3', label: 'A3 용지 (42 × 29.7 cm)', w: 42, h: 29.7 },
+  { id: 'm05', label: '50 × 50 cm 흰 판', w: 50, h: 50 },
+  { id: 'm1', label: '1 m × 1 m 흰 판', w: 100, h: 100 },
+  { id: 'custom', label: '직접 입력' },
+];
+const S = {
+  target: 30, tol: 2, order: 'line',
+  det: { color: 'orange', hueTol: 18, satMin: 50 },
+  ref: { id: 'a4', w: 29.7, h: 21 },
+  results: [], source: '',
+};
+const KEY = 'stake-ar-settings-v1';
+try {
+  const o = JSON.parse(localStorage.getItem(KEY) || 'null');
+  if (o) {
+    if (typeof o.target === 'number') S.target = o.target;
+    if (typeof o.tol === 'number') S.tol = o.tol;
+    if (o.order) S.order = o.order;
+    if (o.det) Object.assign(S.det, o.det);
+    if (o.ref) Object.assign(S.ref, o.ref);
+  }
+} catch (e) { /* ignore */ }
+function save() { try { localStorage.setItem(KEY, JSON.stringify({ target: S.target, tol: S.tol, order: S.order, det: S.det, ref: S.ref })); } catch (e) { /* ignore */ } }
+
+/* ---------- math ---------- */
+const hyp = Math.hypot, clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function gauss(A, b) {
+  const n = b.length, M = A.map((r, i) => r.concat([b[i]]));
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    if (Math.abs(M[p][c]) < 1e-12) return null;
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let r = 0; r < n; r++) {
+      if (r === c) continue;
+      const f = M[r][c] / M[c][c];
+      if (f) for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+    }
+  }
+  return M.map((r, i) => r[n] / r[i]);
+}
+function solveH(src, dst) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+  }
+  const h = gauss(A, b);
+  return h ? [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1] : null;
+}
+function inv3(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g, det = a * A + b * B + c * C;
+  if (Math.abs(det) < 1e-15) return null;
+  return [A / det, -(b * i - c * h) / det, (b * f - c * e) / det, B / det, (a * i - c * g) / det, -(a * f - c * d) / det, C / det, -(a * h - b * g) / det, (a * e - b * d) / det];
+}
+function ap(H, x, y) { const w = H[6] * x + H[7] * y + H[8]; return [(H[0] * x + H[1] * y + H[2]) / w, (H[3] * x + H[4] * y + H[5]) / w, w]; }
+function pip(pt, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function hueDist(a, b) { const d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
+// 4x4, column-major (WebXR / WebGL layout)
+function mul4(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
+    o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
+  return o;
+}
+function xf4(m, x, y, z, w) {
+  return [m[0] * x + m[4] * y + m[8] * z + m[12] * w, m[1] * x + m[5] * y + m[9] * z + m[13] * w,
+          m[2] * x + m[6] * y + m[10] * z + m[14] * w, m[3] * x + m[7] * y + m[11] * z + m[15] * w];
+}
+function inv4(m) {
+  const o = new Float32Array(16);
+  const a00 = m[0], a01 = m[1], a02 = m[2], a03 = m[3], a10 = m[4], a11 = m[5], a12 = m[6], a13 = m[7];
+  const a20 = m[8], a21 = m[9], a22 = m[10], a23 = m[11], a30 = m[12], a31 = m[13], a32 = m[14], a33 = m[15];
+  const b00 = a00 * a11 - a01 * a10, b01 = a00 * a12 - a02 * a10, b02 = a00 * a13 - a03 * a10, b03 = a01 * a12 - a02 * a11;
+  const b04 = a01 * a13 - a03 * a11, b05 = a02 * a13 - a03 * a12, b06 = a20 * a31 - a21 * a30, b07 = a20 * a32 - a22 * a30;
+  const b08 = a20 * a33 - a23 * a30, b09 = a21 * a32 - a22 * a31, b10 = a21 * a33 - a23 * a31, b11 = a22 * a33 - a23 * a32;
+  let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+  if (!det) return null;
+  det = 1 / det;
+  o[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det; o[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
+  o[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det; o[3] = (a22 * b04 - a21 * b05 - a23 * b03) * det;
+  o[4] = (a12 * b08 - a10 * b11 - a13 * b07) * det; o[5] = (a00 * b11 - a02 * b08 + a03 * b07) * det;
+  o[6] = (a32 * b02 - a30 * b05 - a33 * b01) * det; o[7] = (a20 * b05 - a22 * b02 + a23 * b01) * det;
+  o[8] = (a10 * b10 - a11 * b08 + a13 * b06) * det; o[9] = (a01 * b08 - a00 * b10 - a03 * b06) * det;
+  o[10] = (a30 * b04 - a31 * b02 + a33 * b00) * det; o[11] = (a21 * b02 - a20 * b04 - a23 * b00) * det;
+  o[12] = (a11 * b07 - a10 * b09 - a12 * b06) * det; o[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
+  o[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det; o[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
+  return o;
+}
+
+/* ---------- image analysis (shared by both modes) ---------- */
+function boxOp(m, w, h, r, isMax) {
+  const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h), ps = new Int32Array(Math.max(w, h) + 1);
+  for (let y = 0; y < h; y++) {
+    const o = y * w;
+    for (let x = 0; x < w; x++) ps[x + 1] = ps[x] + m[o + x];
+    for (let x = 0; x < w; x++) { const a = Math.max(0, x - r), b = Math.min(w - 1, x + r), s = ps[b + 1] - ps[a]; tmp[o + x] = isMax ? (s > 0 ? 1 : 0) : (s === b - a + 1 ? 1 : 0); }
+  }
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) ps[y + 1] = ps[y] + tmp[y * w + x];
+    for (let y = 0; y < h; y++) { const a = Math.max(0, y - r), b = Math.min(h - 1, y + r), s = ps[b + 1] - ps[a]; out[y * w + x] = isMax ? (s > 0 ? 1 : 0) : (s === b - a + 1 ? 1 : 0); }
+  }
+  return out;
+}
+/* One pass over the frame: a mask of marker-coloured pixels and a mask of white-paper pixels. */
+function buildMasks(d, w, h, wantPaper) {
+  const n = w * h, mk = new Uint8Array(n), V = wantPaper ? new Uint8Array(n) : null, Sa = wantPaper ? new Uint8Array(n) : null;
+  const hist = wantPaper ? new Uint32Array(256) : null;
+  const p = PRESETS.find(x => x.id === S.det.color) || PRESETS[0], tol = S.det.hueTol, satMin = S.det.satMin / 100, hue = p.hue;
+  for (let i = 0, j = 0; i < n; i++, j += 4) {
+    const r = d[j], g = d[j + 1], b = d[j + 2];
+    const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b), dd = mx - mn;
+    const s = mx ? dd / mx : 0;
+    if (wantPaper) { V[i] = mx; Sa[i] = s * 255; hist[mx]++; }
+    if (s >= satMin && mx >= 76) {
+      let hh;
+      if (mx === r) hh = ((g - b) / dd) % 6; else if (mx === g) hh = (b - r) / dd + 2; else hh = (r - g) / dd + 4;
+      hh *= 60; if (hh < 0) hh += 360;
+      if (hueDist(hh, hue) <= tol) mk[i] = 1;
+    }
+  }
+  let paper = null;
+  if (wantPaper) {
+    let acc = 0, pv = 255; const target = n * 0.994;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= target) { pv = v; break; } }
+    const thr = clamp(pv - 40, 125, 215);
+    paper = new Uint8Array(n);
+    for (let i = 0; i < n; i++) paper[i] = V[i] >= thr && Sa[i] <= 58 ? 1 : 0;
+  }
+  return { mk, paper };
+}
+const labBuf = { lab: null, q: null, n: 0 };
+function labBufs(n) { if (labBuf.n !== n) { labBuf.lab = new Int32Array(n); labBuf.q = new Int32Array(n); labBuf.n = n; } else labBuf.lab.fill(0); return labBuf; }
+function findStakes(mk, w, h, minDiam, excl) {
+  const m = boxOp(boxOp(mk, w, h, 1, true), w, h, 1, false);
+  const { lab, q } = labBufs(w * h);
+  const minArea = Math.PI * minDiam * minDiam / 4, maxArea = w * h * 0.06, out = [];
+  let nl = 0;
+  for (let s0 = 0; s0 < m.length; s0++) {
+    if (!m[s0] || lab[s0]) continue;
+    nl++; let head = 0, tail = 0; q[tail++] = s0; lab[s0] = nl;
+    let sx = 0, sy = 0, minY = 1e9, maxY = -1;
+    while (head < tail) {
+      const p = q[head++], x = p % w, y = (p - x) / w;
+      sx += x; sy += y; if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (x > 0 && m[p - 1] && !lab[p - 1]) { lab[p - 1] = nl; q[tail++] = p - 1; }
+      if (x < w - 1 && m[p + 1] && !lab[p + 1]) { lab[p + 1] = nl; q[tail++] = p + 1; }
+      if (y > 0 && m[p - w] && !lab[p - w]) { lab[p - w] = nl; q[tail++] = p - w; }
+      if (y < h - 1 && m[p + w] && !lab[p + w]) { lab[p + w] = nl; q[tail++] = p + w; }
+    }
+    const area = tail;
+    if (area < minArea || area > maxArea) continue;
+    if (excl && pip([sx / area, sy / area], excl)) continue;
+    const band = Math.max(1.5, (maxY - minY) * 0.06);
+    let bx = 0, bn = 0;
+    for (let t = 0; t < tail; t++) { const p = q[t]; if (((p / w) | 0) >= maxY - band) { bx += p % w; bn++; } }
+    out.push({ x: bx / bn + 0.5, y: maxY + 0.8, area });
+  }
+  return out;
+}
+function hull(pts) {
+  pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const p of pts) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], p) <= 0) up.pop(); up.push(p); }
+  lo.pop(); up.pop();
+  return lo.concat(up);
+}
+function polyArea(q) { let s = 0; for (let i = 0; i < q.length; i++) { const a = q[i], b = q[(i + 1) % q.length]; s += a[0] * b[1] - b[0] * a[1]; } return s / 2; }
+function quadOf(hl) {
+  let A = 0, B = 0, best = -1;
+  for (let i = 0; i < hl.length; i++) for (let j = i + 1; j < hl.length; j++) {
+    const d = (hl[i][0] - hl[j][0]) ** 2 + (hl[i][1] - hl[j][1]) ** 2;
+    if (d > best) { best = d; A = i; B = j; }
+  }
+  const a = hl[A], b = hl[B];
+  let c = null, e = null, cm = 0, em = 0;
+  for (const p of hl) {
+    const cr = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]);
+    if (cr > cm) { cm = cr; c = p; }
+    if (cr < em) { em = cr; e = p; }
+  }
+  if (!c || !e) return null;
+  let q = [a, c, b, e];
+  if (polyArea(q) < 0) q.reverse();
+  return q;
+}
+function findPaper(paper, w, h) {
+  const m = boxOp(boxOp(paper, w, h, 1, true), w, h, 1, false);
+  const { lab, q } = labBufs(w * h);
+  const n = w * h, rowMin = new Int32Array(h), rowMax = new Int32Array(h), rowStamp = new Int32Array(h);
+  let nl = 0, bestQ = null, bestArea = 0;
+  for (let s0 = 0; s0 < n; s0++) {
+    if (!m[s0] || lab[s0]) continue;
+    nl++; let head = 0, tail = 0; q[tail++] = s0; lab[s0] = nl;
+    let minX = 1e9, maxX = -1, minY = 1e9, maxY = -1;
+    while (head < tail) {
+      const p = q[head++], x = p % w, y = (p - x) / w;
+      if (rowStamp[y] !== nl) { rowStamp[y] = nl; rowMin[y] = x; rowMax[y] = x; } else { if (x < rowMin[y]) rowMin[y] = x; if (x > rowMax[y]) rowMax[y] = x; }
+      if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+      if (x > 0 && m[p - 1] && !lab[p - 1]) { lab[p - 1] = nl; q[tail++] = p - 1; }
+      if (x < w - 1 && m[p + 1] && !lab[p + 1]) { lab[p + 1] = nl; q[tail++] = p + 1; }
+      if (y > 0 && m[p - w] && !lab[p - w]) { lab[p - w] = nl; q[tail++] = p - w; }
+      if (y < h - 1 && m[p + w] && !lab[p + w]) { lab[p + w] = nl; q[tail++] = p + w; }
+    }
+    const area = tail;
+    if (area < n * 0.0012 || area > n * 0.45 || area <= bestArea) continue;
+    if (minX <= 1 || minY <= 1 || maxX >= w - 2 || maxY >= h - 2) continue;
+    const pts = [];
+    for (let y = minY; y <= maxY; y++) if (rowStamp[y] === nl) { pts.push([rowMin[y], y], [rowMax[y] + 1, y], [rowMin[y], y + 1], [rowMax[y] + 1, y + 1]); }
+    const qd = quadOf(hull(pts));
+    if (!qd) continue;
+    const fill = area / Math.abs(polyArea(qd));
+    if (fill < 0.84 || fill > 1.1) continue;
+    let okAngles = true;
+    for (let i = 0; i < 4; i++) {
+      const p0 = qd[(i + 3) % 4], p1 = qd[i], p2 = qd[(i + 1) % 4];
+      const v1 = [p0[0] - p1[0], p0[1] - p1[1]], v2 = [p2[0] - p1[0], p2[1] - p1[1]];
+      const cs = (v1[0] * v2[0] + v1[1] * v2[1]) / ((hyp(v1[0], v1[1]) * hyp(v2[0], v2[1])) || 1);
+      if (Math.abs(cs) > 0.9) okAngles = false;
+    }
+    if (!okAngles) continue;
+    bestQ = qd; bestArea = area;
+  }
+  return bestQ;
+}
+
+/* Sub-pixel corners: threshold halfway between sheet and ground, trace the sheet's outline,
+   fit a straight line to each of its four sides, intersect the lines. quad is in src pixels. */
+const RC = document.createElement('canvas');
+function refineQuad(src, sw, sh, quad) {
+  let x0 = Math.min(...quad.map(p => p[0])), x1 = Math.max(...quad.map(p => p[0]));
+  let y0 = Math.min(...quad.map(p => p[1])), y1 = Math.max(...quad.map(p => p[1]));
+  const pad = Math.max(8, 0.2 * Math.max(x1 - x0, y1 - y0));
+  x0 = Math.floor(Math.max(0, x0 - pad)); y0 = Math.floor(Math.max(0, y0 - pad));
+  x1 = Math.ceil(Math.min(sw, x1 + pad)); y1 = Math.ceil(Math.min(sh, y1 + pad));
+  const bw = x1 - x0, bh = y1 - y0; if (bw < 12 || bh < 12) return null;
+  const r = Math.min(1, 640 / Math.max(bw, bh)), cw = Math.round(bw * r), ch = Math.round(bh * r);
+  if (RC.width !== cw || RC.height !== ch) { RC.width = cw; RC.height = ch; }
+  const g = RC.getContext('2d', { willReadFrequently: true });
+  g.drawImage(src, x0, y0, bw, bh, 0, 0, cw, ch);
+  const d = g.getImageData(0, 0, cw, ch).data, n = cw * ch, Y = new Uint8Array(n);
+  for (let i = 0, j = 0; i < n; i++, j += 4) Y[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
+  const qc = quad.map(p => [(p[0] - x0) * r, (p[1] - y0) * r]);
+  const cx = qc.reduce((s, p) => s + p[0], 0) / 4, cy = qc.reduce((s, p) => s + p[1], 0) / 4;
+  const inner = qc.map(p => [cx + (p[0] - cx) * 0.7, cy + (p[1] - cy) * 0.7]), outer = qc.map(p => [cx + (p[0] - cx) * 1.2, cy + (p[1] - cy) * 1.2]);
+  let si = 0, ni = 0, so = 0, no = 0;
+  for (let y = 0; y < ch; y += 2) for (let x = 0; x < cw; x += 2) {
+    if (pip([x, y], inner)) { si += Y[y * cw + x]; ni++; } else if (!pip([x, y], outer)) { so += Y[y * cw + x]; no++; }
+  }
+  if (!ni || !no || si / ni - so / no < 24) return null;
+  const thr = (si / ni + so / no) / 2, c0 = Math.round(cy) * cw + Math.round(cx);
+  if (!(Y[c0] >= thr)) return null;
+  const seen = new Uint8Array(n), q = new Int32Array(n);
+  let head = 0, tail = 0; q[tail++] = c0; seen[c0] = 1;
+  while (head < tail) {
+    const p = q[head++], x = p % cw, y = (p - x) / cw;
+    if (x > 0 && !seen[p - 1] && Y[p - 1] >= thr) { seen[p - 1] = 1; q[tail++] = p - 1; }
+    if (x < cw - 1 && !seen[p + 1] && Y[p + 1] >= thr) { seen[p + 1] = 1; q[tail++] = p + 1; }
+    if (y > 0 && !seen[p - cw] && Y[p - cw] >= thr) { seen[p - cw] = 1; q[tail++] = p - cw; }
+    if (y < ch - 1 && !seen[p + cw] && Y[p + cw] >= thr) { seen[p + cw] = 1; q[tail++] = p + cw; }
+  }
+  const E = [0, 1, 2, 3].map(i => {
+    const a = qc[i], b = qc[(i + 1) % 4], dx = b[0] - a[0], dy = b[1] - a[1];
+    return { a, dx, dy, l2: dx * dx + dy * dy, n: 0, sx: 0, sy: 0, sxx: 0, syy: 0, sxy: 0 };
+  });
+  const maxD = 0.15 * Math.sqrt(Math.min(...E.map(e => e.l2))) + 3;
+  const add = (px, py) => {
+    let be = null, bd = maxD;
+    for (const e of E) {
+      const t = ((px - e.a[0]) * e.dx + (py - e.a[1]) * e.dy) / e.l2;
+      if (t < 0.12 || t > 0.88) continue;
+      const dd = Math.abs((px - e.a[0]) * e.dy - (py - e.a[1]) * e.dx) / Math.sqrt(e.l2);
+      if (dd < bd) { bd = dd; be = e; }
+    }
+    if (be) { be.n++; be.sx += px; be.sy += py; be.sxx += px * px; be.syy += py * py; be.sxy += px * py; }
+  };
+  for (let t = 0; t < tail; t++) {
+    const p = q[t], x = p % cw, y = (p - x) / cw, v = Y[p];
+    if (x > 0 && Y[p - 1] < thr) add(x + 0.5 - (v - thr) / (v - Y[p - 1]), y + 0.5);
+    if (x < cw - 1 && Y[p + 1] < thr) add(x + 0.5 + (v - thr) / (v - Y[p + 1]), y + 0.5);
+    if (y > 0 && Y[p - cw] < thr) add(x + 0.5, y + 0.5 - (v - thr) / (v - Y[p - cw]));
+    if (y < ch - 1 && Y[p + cw] < thr) add(x + 0.5, y + 0.5 + (v - thr) / (v - Y[p + cw]));
+  }
+  const lines = [];
+  for (const e of E) {
+    if (e.n < 8) return null;
+    const mx = e.sx / e.n, my = e.sy / e.n, vxx = e.sxx / e.n - mx * mx, vyy = e.syy / e.n - my * my, vxy = e.sxy / e.n - mx * my;
+    const th = 0.5 * Math.atan2(2 * vxy, vxx - vyy);
+    lines.push({ x: mx, y: my, dx: Math.cos(th), dy: Math.sin(th) });
+  }
+  const out = [], lim = 0.1 * hyp(bw, bh) * r + 4;
+  for (let i = 0; i < 4; i++) {
+    const A1 = lines[(i + 3) % 4], B1 = lines[i], den = A1.dx * B1.dy - A1.dy * B1.dx;
+    if (Math.abs(den) < 1e-6) return null;
+    const t = ((B1.x - A1.x) * B1.dy - (B1.y - A1.y) * B1.dx) / den, X = A1.x + A1.dx * t, Yc = A1.y + A1.dy * t;
+    if (hyp(X - qc[i][0], Yc - qc[i][1]) > lim) return null;
+    out.push([X / r + x0, Yc / r + y0]);
+  }
+  return out;
+}
+
+/* ---------- results ---------- */
+/* pts: [{X, Y, Z}] in cm. X/Y span the ground; Z is height (0 in camera mode). */
+function compute(pts) {
+  const R = { order: [], segs: [], rank: new Map(), stats: null };
+  if (pts.length < 2) { pts.forEach((p, n) => { R.rank.set(n, n + 1); R.order.push(n); }); return R; }
+  const P = pts.map((p, i) => ({ i, X: p.X, Y: p.Y, Z: p.Z || 0 }));
+  const mx = P.reduce((s, p) => s + p.X, 0) / P.length, my = P.reduce((s, p) => s + p.Y, 0) / P.length;
+  let sxx = 0, syy = 0, sxy = 0;
+  for (const p of P) { const dx = p.X - mx, dy = p.Y - my; sxx += dx * dx; syy += dy * dy; sxy += dx * dy; }
+  const th = 0.5 * Math.atan2(2 * sxy, sxx - syy), ux = Math.cos(th), uy = Math.sin(th);
+  for (const p of P) { p.t = (p.X - mx) * ux + (p.Y - my) * uy; p.e = -(p.X - mx) * uy + (p.Y - my) * ux; }
+  const dist = (a, b) => hyp(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
+  let seq;
+  if (S.order === 'line') seq = P.slice().sort((a, b) => a.t - b.t);
+  else {
+    const left = P.slice().sort((a, b) => a.t - b.t); seq = [left.shift()];
+    while (left.length) {
+      const last = seq[seq.length - 1]; let bi = 0, bd = Infinity;
+      left.forEach((p, n) => { const d = dist(p, last); if (d < bd) { bd = d; bi = n; } });
+      seq.push(left.splice(bi, 1)[0]);
+    }
+  }
+  if (seq[0].i > seq[seq.length - 1].i) seq.reverse(); // number from the first point placed / leftmost
+  R.order = seq.map(p => p.i);
+  seq.forEach((p, n) => R.rank.set(p.i, n + 1));
+  const ds = [];
+  for (let n = 1; n < seq.length; n++) {
+    const d = dist(seq[n - 1], seq[n]);
+    R.segs.push({ a: seq[n - 1].i, b: seq[n].i, d, st: judge(d), from: n, to: n + 1 });
+    ds.push(d);
+  }
+  const mean = ds.reduce((s, d) => s + d, 0) / ds.length;
+  R.stats = {
+    n: seq.length, mean, sd: Math.sqrt(ds.reduce((s, d) => s + (d - mean) ** 2, 0) / ds.length),
+    min: Math.min(...ds), max: Math.max(...ds), total: ds.reduce((s, d) => s + d, 0),
+    dev: Math.max(...P.map(p => Math.abs(p.e))), bad: R.segs.filter(s => s.st === 'bad').length,
+  };
+  return R;
+}
+function judge(d) { return S.target > 0 ? (Math.abs(d - S.target) <= S.tol + 1e-9 ? 'ok' : 'bad') : 'none'; }
+const fmt = (d) => d.toFixed(1);
+const cm = (d) => d >= 1000 ? `${(d / 100).toFixed(2)} m` : `${d.toFixed(1)} cm`;
+const COL = { ok: '#6CF0A0', bad: '#FF6E6E', none: '#FFE066', cal: '#3BE0EA', pt: '#FFE066' };
+
+function hudSum(prefix, R, n) {
+  const st = R.stats;
+  $(prefix + 'N').textContent = String(n);
+  $(prefix + 'Mean').textContent = st ? fmt(st.mean) : '–';
+  $(prefix + 'Range').textContent = st ? `${fmt(st.min)}~${fmt(st.max)}` : '–';
+  const b = $(prefix + 'Bad');
+  if (st && S.target > 0) { b.textContent = String(st.bad); b.className = st.bad ? 'bad' : 'ok'; } else { b.textContent = '–'; b.className = ''; }
+}
+function pill(g, x, y, text, color, u) {
+  g.font = `600 ${13 * u}px "IBM Plex Mono", ui-monospace, monospace`;
+  const w = g.measureText(text).width + 10 * u, h = 20 * u;
+  g.fillStyle = 'rgba(12,16,14,0.86)'; g.beginPath();
+  if (g.roundRect) g.roundRect(x - w / 2, y - h / 2, w, h, 5 * u); else g.rect(x - w / 2, y - h / 2, w, h);
+  g.fill(); g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, x, y + 0.5 * u);
+}
+/* Draws ordered points, the lines between them and the distance labels. sp: screen positions (or null). */
+function drawChain(g, R, sp) {
+  g.lineCap = 'round';
+  for (const s of R.segs) {
+    const a = sp[s.a], b = sp[s.b]; if (!a || !b) continue;
+    g.strokeStyle = 'rgba(0,0,0,0.55)'; g.lineWidth = 5; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    g.strokeStyle = COL[s.st]; g.lineWidth = 2.4; g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  }
+  for (const s of R.segs) {
+    const a = sp[s.a], b = sp[s.b]; if (!a || !b) continue;
+    const L = hyp(b[0] - a[0], b[1] - a[1]); if (L < 30) continue;
+    let nx = -(b[1] - a[1]) / L, ny = (b[0] - a[0]) / L; if (ny < 0) { nx = -nx; ny = -ny; }
+    pill(g, (a[0] + b[0]) / 2 + nx * 16, (a[1] + b[1]) / 2 + ny * 16, fmt(s.d), COL[s.st], 1);
+  }
+  sp.forEach((p, i) => {
+    if (!p) return;
+    g.fillStyle = 'rgba(0,0,0,0.55)'; g.beginPath(); g.arc(p[0], p[1], 8.5, 0, 6.2832); g.fill();
+    g.fillStyle = COL.pt; g.beginPath(); g.arc(p[0], p[1], 6, 0, 6.2832); g.fill();
+    g.fillStyle = '#111'; g.beginPath(); g.arc(p[0], p[1], 1.8, 0, 6.2832); g.fill();
+    const rank = R.rank.get(i);
+    if (rank) {
+      g.font = '700 12px "IBM Plex Mono", monospace'; g.textAlign = 'center'; g.textBaseline = 'bottom';
+      g.fillStyle = 'rgba(0,0,0,0.8)'; g.fillText(String(rank), p[0] + 1, p[1] - 9);
+      g.fillStyle = '#fff'; g.fillText(String(rank), p[0], p[1] - 10);
+    }
+  });
+}
+function sizeCanvas(cv) {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5), w = cv.clientWidth || window.innerWidth, h = cv.clientHeight || window.innerHeight;
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+  return { g, w, h };
+}
+let toastT = 0;
+function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true; }, 3000); }
+
+/* =====================================================================
+   Live camera mode: reference sheet + stakes found in every frame
+   ===================================================================== */
+const L = { stream: null, video: $('lvVideo'), cv: $('lvCanvas'), work: document.createElement('canvas'), running: false, frozen: false,
+            quad: null, miss: 0, M: null, Mi: null, wSign: 1, tracks: [], last: 0, k: 1, R: compute([]) };
+function refDims() { return { w: Math.max(S.ref.w, S.ref.h), h: Math.min(S.ref.w, S.ref.h) }; }
+async function startLive() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { toast('이 브라우저에서는 카메라를 쓸 수 없어요.'); return; }
+  try {
+    L.stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+  } catch (e) {
+    toast(e && e.name === 'NotAllowedError' ? '카메라 권한을 허용해 주세요.' : '카메라를 켤 수 없어요.');
+    return;
+  }
+  L.video.srcObject = L.stream;
+  try { await L.video.play(); } catch (e) { /* autoplay may need the tap that started this; ignore */ }
+  $('lvLayer').hidden = false; $('page').hidden = true;
+  L.running = true; L.frozen = false; L.quad = null; L.M = null; L.tracks = []; L.miss = 0;
+  $('lvFreeze').textContent = '멈춤';
+  requestAnimationFrame(liveLoop);
+}
+function stopLive() {
+  L.running = false;
+  if (L.stream) L.stream.getTracks().forEach(t => t.stop());
+  L.stream = null; L.video.srcObject = null;
+  $('lvLayer').hidden = true; $('page').hidden = false;
+  const vis = L.tracks.filter(t => t.age >= 3);
+  if (vis.length >= 2) { S.results = vis.map(t => ({ X: t.X, Y: t.Y, Z: 0 })); S.source = '실시간 카메라'; }
+  renderMain();
+}
+function liveLoop(t) {
+  if (!L.running) return;
+  if (!L.frozen && t - L.last > 90) { L.last = t; processLive(); }
+  drawLive();
+  requestAnimationFrame(liveLoop);
+}
+function alignQuad(q, prev) {
+  let best = 0, bd = Infinity;
+  for (let r = 0; r < 4; r++) {
+    let d = 0; for (let i = 0; i < 4; i++) d += hyp(q[(i + r) % 4][0] - prev[i][0], q[(i + r) % 4][1] - prev[i][1]);
+    if (d < bd) { bd = d; best = r; }
+  }
+  return { q: [0, 1, 2, 3].map(i => q[(i + best) % 4]), d: bd / 4 };
+}
+function processLive() {
+  const v = L.video, vw = v.videoWidth, vh = v.videoHeight;
+  if (!vw || !vh) return;
+  const k = Math.min(1, 640 / Math.max(vw, vh)), w = Math.round(vw * k), h = Math.round(vh * k);
+  L.k = k;
+  if (L.work.width !== w || L.work.height !== h) { L.work.width = w; L.work.height = h; }
+  const wg = L.work.getContext('2d', { willReadFrequently: true });
+  wg.drawImage(v, 0, 0, w, h);
+  const d = wg.getImageData(0, 0, w, h).data;
+  const { mk, paper } = buildMasks(d, w, h, true);
+
+  const coarse = findPaper(paper, w, h);
+  if (coarse) {
+    let q = coarse.map(p => [p[0] / k, p[1] / k]); // video pixels
+    const fine = refineQuad(v, vw, vh, q);
+    L.fine = !!fine; if (fine) q = fine;
+    if (L.quad) {
+      const al = alignQuad(q, L.quad);
+      if (al.d < hyp(vw, vh) * 0.05) q = al.q.map((p, i) => [L.quad[i][0] * 0.5 + p[0] * 0.5, L.quad[i][1] * 0.5 + p[1] * 0.5]);
+      else { q = longFirst(q); L.tracks = []; }
+    } else q = longFirst(q);
+    L.quad = q; L.miss = 0;
+  } else if (++L.miss > 12) { L.quad = null; }
+
+  L.M = null; L.Mi = null;
+  if (L.quad) {
+    const r = refDims();
+    const M = solveH(L.quad, [[0, 0], [r.w, 0], [r.w, r.h], [0, r.h]]), Mi = M && inv3(M);
+    if (M && Mi) { L.M = M; L.Mi = Mi; L.wSign = Math.sign(ap(Mi, r.w / 2, r.h / 2)[2]) || 1; }
+  }
+  let excl = null;
+  if (L.quad) { const cx = L.quad.reduce((s, p) => s + p[0], 0) / 4, cy = L.quad.reduce((s, p) => s + p[1], 0) / 4; excl = L.quad.map(p => [(cx + (p[0] - cx) * 1.1) * k, (cy + (p[1] - cy) * 1.1) * k]); }
+  const dets = findStakes(mk, w, h, 3.5, excl);
+  if (L.M && coarse) {
+    const world = [];
+    for (const p of dets) {
+      const r = ap(L.M, p.x / k, p.y / k), back = ap(L.Mi, r[0], r[1]);
+      if (Math.sign(back[2]) === L.wSign && isFinite(r[0]) && Math.abs(r[0]) < 3000 && Math.abs(r[1]) < 3000) world.push({ X: r[0], Y: r[1] });
+    }
+    for (const t of L.tracks) t.hit = false;
+    for (const p of world) {
+      let bt = null, bd = 6;
+      for (const t of L.tracks) { if (t.hit) continue; const dd = hyp(t.X - p.X, t.Y - p.Y); if (dd < bd) { bd = dd; bt = t; } }
+      if (bt) { bt.X += (p.X - bt.X) * 0.3; bt.Y += (p.Y - bt.Y) * 0.3; bt.hit = true; bt.age++; bt.miss = 0; }
+      else L.tracks.push({ X: p.X, Y: p.Y, age: 1, miss: 0, hit: true });
+    }
+    for (const t of L.tracks) if (!t.hit) t.miss++;
+    L.tracks = L.tracks.filter(t => t.miss <= 7);
+  }
+  L.rawCount = dets.length;
+}
+function longFirst(q) {
+  const e = (i) => hyp(q[(i + 1) % 4][0] - q[i][0], q[(i + 1) % 4][1] - q[i][1]);
+  return e(1) + e(3) > e(0) + e(2) ? [q[1], q[2], q[3], q[0]] : q;
+}
+function drawLive() {
+  const { g, w: CW, h: CH } = sizeCanvas(L.cv);
+  const vw = L.video.videoWidth, vh = L.video.videoHeight;
+  const msg = $('lvMsg');
+  if (!vw) { msg.textContent = '카메라를 켜는 중…'; return; }
+  const sc = Math.max(CW / vw, CH / vh), ox = (CW - vw * sc) / 2, oy = (CH - vh * sc) / 2;
+  const toS = (x, y) => [x * sc + ox, y * sc + oy]; // video pixels to screen
+  const vis = L.tracks.filter(t => t.age >= 3);
+  L.R = compute(vis.map(t => ({ X: t.X, Y: t.Y, Z: 0 })));
+  if (L.quad && L.Mi) {
+    const r = refDims();
+    // ground grid
+    const xs = [0, r.w].concat(vis.map(t => t.X)), ys = [0, r.h].concat(vis.map(t => t.Y));
+    let x0 = Math.min(...xs) - 30, x1 = Math.max(...xs) + 30, y0 = Math.min(...ys) - 30, y1 = Math.max(...ys) + 30;
+    const span = Math.max(x1 - x0, y1 - y0), step = span > 900 ? 50 : span > 360 ? 20 : 10, major = step >= 50 ? 100 : 50;
+    x0 = Math.floor(x0 / step) * step; y0 = Math.floor(y0 / step) * step;
+    const line = (ax, ay, bx, by) => {
+      g.beginPath(); let pen = false;
+      for (let n = 0; n <= 16; n++) {
+        const rr = ap(L.Mi, ax + (bx - ax) * n / 16, ay + (by - ay) * n / 16);
+        if (Math.sign(rr[2]) !== L.wSign || Math.abs(rr[0]) > 1e5 || Math.abs(rr[1]) > 1e5) { pen = false; continue; }
+        const [sx, sy] = toS(rr[0], rr[1]);
+        if (pen) g.lineTo(sx, sy); else { g.moveTo(sx, sy); pen = true; }
+      }
+      g.stroke();
+    };
+    if ((x1 - x0) / step + (y1 - y0) / step < 200) {
+      for (let X = x0; X <= x1; X += step) { const mj = Math.abs(X % major) < 1e-6; g.strokeStyle = mj ? 'rgba(59,224,234,0.45)' : 'rgba(255,255,255,0.16)'; g.lineWidth = mj ? 1.2 : 0.8; line(X, y0, X, y1); }
+      for (let Y = y0; Y <= y1; Y += step) { const mj = Math.abs(Y % major) < 1e-6; g.strokeStyle = mj ? 'rgba(59,224,234,0.45)' : 'rgba(255,255,255,0.16)'; g.lineWidth = mj ? 1.2 : 0.8; line(x0, Y, x1, Y); }
+    }
+    const sp = L.quad.map(p => toS(p[0], p[1]));
+    g.strokeStyle = COL.cal; g.lineWidth = 2.5; g.fillStyle = 'rgba(59,224,234,0.14)';
+    g.beginPath(); sp.forEach((p, n) => n ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.fill(); g.stroke();
+    pill(g, (sp[0][0] + sp[1][0]) / 2, (sp[0][1] + sp[1][1]) / 2, `${r.w}`, COL.cal, 1);
+    pill(g, (sp[1][0] + sp[2][0]) / 2, (sp[1][1] + sp[2][1]) / 2, `${r.h}`, COL.cal, 1);
+    const pts = vis.map(t => { const rr = ap(L.Mi, t.X, t.Y); return Math.sign(rr[2]) === L.wSign ? toS(rr[0], rr[1]) : null; });
+    drawChain(g, L.R, pts);
+    msg.className = 'pillmsg good';
+    msg.textContent = L.frozen ? '멈춘 화면입니다. 계속하려면 ‘계속’을 누르세요.'
+      : vis.length ? `기준 용지와 말뚝 ${vis.length}개를 찾았어요.` : '기준 용지를 찾았어요. 말뚝이 화면에 들어오게 비춰 주세요.';
+  } else {
+    msg.className = 'pillmsg wait';
+    msg.textContent = L.rawCount ? `말뚝 후보 ${L.rawCount}개가 보여요. 흰 기준 용지가 통째로 화면에 들어오게 해 주세요.` : '흰 기준 용지와 말뚝이 함께 보이게 비춰 주세요.';
+  }
+  hudSum('lv', L.R, vis.length);
+}
+$('btnLive').onclick = startLive;
+$('lvExit').onclick = stopLive;
+$('lvFreeze').onclick = () => {
+  L.frozen = !L.frozen;
+  if (L.frozen) L.video.pause(); else L.video.play().catch(() => {});
+  $('lvFreeze').textContent = L.frozen ? '계속' : '멈춤';
+};
+$('lvSwap').onclick = () => { if (L.quad) { L.quad = [L.quad[1], L.quad[2], L.quad[3], L.quad[0]]; L.tracks = []; if (L.frozen) toast('‘계속’을 누르면 바뀐 방향으로 다시 잽니다.'); } };
+
+/* =====================================================================
+   AR mode (WebXR hit-test): the phone finds the floor, no reference sheet
+   ===================================================================== */
+const A = { session: null, gl: null, ref: null, hitSrc: null, binding: null, cam: false, points: [], cands: [], reticle: null, plane: null,
+            lastDet: 0, prog: null, fbo: null, tex: null, buf: null, px: null, img: null, dw: 0, dh: 0, R: compute([]), anchors: false };
+async function checkAR() {
+  const el = $('arState'), btn = $('btnAR');
+  let ok = false;
+  try { ok = !!(navigator.xr && await navigator.xr.isSessionSupported('immersive-ar')); } catch (e) { ok = false; }
+  if (ok) { el.textContent = '이 기기에서 쓸 수 있어요.'; el.className = 'state ok'; btn.disabled = false; }
+  else { el.textContent = '이 기기·브라우저는 AR을 지원하지 않아요. 실시간 카메라 측정을 쓰세요.'; el.className = 'state no'; btn.disabled = true; btn.className = 'btn'; }
+}
+async function startAR() {
+  const layer = $('arLayer');
+  const glc = document.createElement('canvas');
+  const gl = glc.getContext('webgl2', { xrCompatible: true, alpha: true }) || glc.getContext('webgl', { xrCompatible: true, alpha: true });
+  if (!gl) { toast('이 기기에서는 AR 화면을 만들 수 없어요.'); return; }
+  layer.hidden = false;
+  let session;
+  try {
+    session = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test', 'dom-overlay'], optionalFeatures: ['anchors', 'camera-access'], domOverlay: { root: layer },
+    });
+  } catch (e) {
+    layer.hidden = true;
+    toast(e && e.name === 'NotAllowedError' ? '카메라 권한을 허용해야 AR 측정을 할 수 있어요.' : 'AR을 시작하지 못했어요. 실시간 카메라 측정을 써 보세요.');
+    return;
+  }
+  try {
+    if (gl.makeXRCompatible) await gl.makeXRCompatible();
+    session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+    A.ref = await session.requestReferenceSpace('local');
+    const viewer = await session.requestReferenceSpace('viewer');
+    A.hitSrc = await session.requestHitTestSource({ space: viewer });
+  } catch (e) {
+    try { await session.end(); } catch (e2) { /* ignore */ }
+    layer.hidden = true; toast('AR을 시작하지 못했어요.'); return;
+  }
+  const feats = session.enabledFeatures || [];
+  A.cam = feats.includes('camera-access') && typeof XRWebGLBinding !== 'undefined';
+  A.anchors = feats.includes('anchors');
+  A.binding = null; A.prog = null; A.fbo = null;
+  if (A.cam) { try { A.binding = new XRWebGLBinding(session, gl); } catch (e) { A.cam = false; } }
+  A.session = session; A.gl = gl; A.points = []; A.cands = []; A.reticle = null; A.plane = null; A.lastDet = 0;
+  $('arAuto').hidden = !A.cam; $('page').hidden = true;
+  session.addEventListener('select', (e) => placeAtReticle(e.frame));
+  session.addEventListener('end', endAR);
+  session.requestAnimationFrame(arFrame);
+}
+function endAR() {
+  $('arLayer').hidden = true; $('page').hidden = false;
+  if (A.points.length >= 2) { S.results = A.points.map(p => ({ X: p.pos[0] * 100, Y: p.pos[2] * 100, Z: p.pos[1] * 100 })); S.source = 'AR'; }
+  A.session = null; A.hitSrc = null; A.binding = null;
+  renderMain();
+}
+function addPoint(pos, frame) {
+  const p = { pos: [pos[0], pos[1], pos[2]], anchor: null };
+  A.points.push(p);
+  if (A.anchors && frame && frame.createAnchor && typeof XRRigidTransform !== 'undefined') {
+    try {
+      frame.createAnchor(new XRRigidTransform({ x: pos[0], y: pos[1], z: pos[2], w: 1 }), A.ref)
+        .then(a => { if (A.points.includes(p)) p.anchor = a; else if (a.delete) a.delete(); }, () => {});
+    } catch (e) { /* anchors are a stability bonus only */ }
+  }
+  if (navigator.vibrate) navigator.vibrate(15);
+}
+function placeAtReticle(frame) {
+  if (!A.reticle) { toast('바닥을 아직 찾지 못했어요. 폰을 조금 더 움직여 주세요.'); return; }
+  addPoint(A.reticle.pos, frame);
+}
+let pendingAdd = false, pendingAuto = false;
+function arFrame(t, frame) {
+  const session = A.session; if (!session) return;
+  session.requestAnimationFrame(arFrame);
+  const gl = A.gl, pose = frame.getViewerPose(A.ref);
+  const view = pose && pose.views[0];
+  if (view && A.cam && A.plane && t - A.lastDet > 320) { A.lastDet = t; try { arCamDetect(view); } catch (e) { A.cam = false; $('arAuto').hidden = true; } }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  if (!view) { drawAR(null); return; }
+
+  const hits = A.hitSrc ? frame.getHitTestResults(A.hitSrc) : [];
+  const hp = hits.length ? hits[0].getPose(A.ref) : null;
+  if (hp) {
+    const m = hp.transform.matrix;
+    A.reticle = { pos: [m[12], m[13], m[14]], ax: [m[0], m[1], m[2]], az: [m[8], m[9], m[10]] };
+    A.plane = { p: A.reticle.pos, n: [m[4], m[5], m[6]] };
+  } else A.reticle = null;
+  for (const p of A.points) {
+    if (!p.anchor) continue;
+    if (frame.trackedAnchors && !frame.trackedAnchors.has(p.anchor)) continue;
+    const apose = frame.getPose(p.anchor.anchorSpace, A.ref);
+    if (apose) { const q = apose.transform.position; p.pos = [q.x, q.y, q.z]; }
+  }
+  if (pendingAdd) { pendingAdd = false; placeAtReticle(frame); }
+  if (pendingAuto) {
+    pendingAuto = false;
+    let n = 0;
+    for (const c of A.cands) if (!A.points.some(p => hyp(p.pos[0] - c[0], p.pos[1] - c[1], p.pos[2] - c[2]) < 0.06)) { addPoint(c, frame); n++; }
+    toast(n ? `${n}개를 추가했어요.` : '새로 추가할 점이 없어요.');
+  }
+  drawAR(view);
+}
+function arCamDetect(view) {
+  const cam = view.camera; if (!cam || !A.binding) return;
+  const tex = A.binding.getCameraImage(cam); if (!tex) return;
+  const gl = A.gl, dw = 384, dh = Math.max(16, Math.round(384 * cam.height / cam.width));
+  if (!A.prog) {
+    const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const pr = gl.createProgram();
+    gl.attachShader(pr, sh(gl.VERTEX_SHADER, 'attribute vec2 p; varying vec2 uv; void main(){ uv = (p + 1.0) * 0.5; gl_Position = vec4(p, 0.0, 1.0); }'));
+    gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, 'precision mediump float; varying vec2 uv; uniform sampler2D t; void main(){ gl_FragColor = texture2D(t, uv); }'));
+    gl.linkProgram(pr); A.prog = pr;
+    A.buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, A.buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  }
+  if (!A.fbo || A.dw !== dw || A.dh !== dh) {
+    A.dw = dw; A.dh = dh; A.px = new Uint8Array(dw * dh * 4); A.img = new Uint8Array(dw * dh * 4);
+    A.tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, A.tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, dw, dh, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    A.fbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, A.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, A.tex, 0);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, A.fbo); gl.viewport(0, 0, dw, dh);
+  gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND); gl.disable(gl.SCISSOR_TEST);
+  gl.useProgram(A.prog); gl.bindBuffer(gl.ARRAY_BUFFER, A.buf);
+  const loc = gl.getAttribLocation(A.prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(gl.getUniformLocation(A.prog, 't'), 0);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.readPixels(0, 0, dw, dh, gl.RGBA, gl.UNSIGNED_BYTE, A.px);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  for (let y = 0; y < dh; y++) A.img.set(A.px.subarray((dh - 1 - y) * dw * 4, (dh - y) * dw * 4), y * dw * 4); // top row first
+  const { mk } = buildMasks(A.img, dw, dh, false);
+  const dets = findStakes(mk, dw, dh, 3, null);
+  const inv = inv4(mul4(view.projectionMatrix, view.transform.inverse.matrix));
+  const out = [];
+  if (inv) for (const d of dets) {
+    const nx = d.x / dw * 2 - 1, ny = 1 - d.y / dh * 2;
+    const a = xf4(inv, nx, ny, -1, 1), b = xf4(inv, nx, ny, 0.5, 1);
+    const o = [a[0] / a[3], a[1] / a[3], a[2] / a[3]], f = [b[0] / b[3], b[1] / b[3], b[2] / b[3]];
+    const dir = [f[0] - o[0], f[1] - o[1], f[2] - o[2]], n = A.plane.n, p0 = A.plane.p;
+    const den = n[0] * dir[0] + n[1] * dir[1] + n[2] * dir[2];
+    if (Math.abs(den) < 1e-6) continue;
+    const tt = (n[0] * (p0[0] - o[0]) + n[1] * (p0[1] - o[1]) + n[2] * (p0[2] - o[2])) / den;
+    if (tt <= 0) continue;
+    const w = [o[0] + dir[0] * tt, o[1] + dir[1] * tt, o[2] + dir[2] * tt];
+    if (hyp(w[0] - o[0], w[1] - o[1], w[2] - o[2]) < 6) out.push(w);
+  }
+  A.cands = out;
+}
+function drawAR(view) {
+  const { g, w: CW, h: CH } = sizeCanvas($('arCanvas'));
+  const msg = $('arMsg');
+  if (!view) { msg.className = 'pillmsg wait'; msg.textContent = '폰을 천천히 움직여 바닥을 비춰 주세요.'; return; }
+  const VP = mul4(view.projectionMatrix, view.transform.inverse.matrix);
+  const proj = (p) => { const c = xf4(VP, p[0], p[1], p[2], 1); if (c[3] <= 0.01) return null; return [(c[0] / c[3] + 1) / 2 * CW, (1 - c[1] / c[3]) / 2 * CH]; };
+  A.R = compute(A.points.map(p => ({ X: p.pos[0] * 100, Y: p.pos[2] * 100, Z: p.pos[1] * 100 })));
+  const fresh = A.cands.filter(c => !A.points.some(p => hyp(p.pos[0] - c[0], p.pos[1] - c[1], p.pos[2] - c[2]) < 0.06));
+  for (const c of fresh) {
+    const s = proj(c); if (!s) continue;
+    g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 5; g.beginPath(); g.arc(s[0], s[1], 9, 0, 6.2832); g.stroke();
+    g.strokeStyle = '#fff'; g.lineWidth = 2; g.setLineDash([4, 4]); g.beginPath(); g.arc(s[0], s[1], 9, 0, 6.2832); g.stroke(); g.setLineDash([]);
+  }
+  $('arAuto').textContent = `인식된 ${fresh.length}개 추가`; $('arAuto').disabled = !fresh.length;
+  drawChain(g, A.R, A.points.map(p => proj(p.pos)));
+  const rt = A.reticle;
+  if (rt) {
+    g.beginPath();
+    for (let n = 0; n <= 32; n++) {
+      const a = n / 32 * 6.2832, c = Math.cos(a) * 0.05, s = Math.sin(a) * 0.05;
+      const sp = proj([rt.pos[0] + rt.ax[0] * c + rt.az[0] * s, rt.pos[1] + rt.ax[1] * c + rt.az[1] * s, rt.pos[2] + rt.ax[2] * c + rt.az[2] * s]);
+      if (!sp) continue; if (n) g.lineTo(sp[0], sp[1]); else g.moveTo(sp[0], sp[1]);
+    }
+    g.strokeStyle = 'rgba(0,0,0,0.6)'; g.lineWidth = 5; g.stroke(); g.strokeStyle = COL.cal; g.lineWidth = 2.5; g.stroke();
+    const c0 = proj(rt.pos);
+    if (c0) {
+      g.fillStyle = COL.cal; g.beginPath(); g.arc(c0[0], c0[1], 3, 0, 6.2832); g.fill();
+      const last = A.points[A.points.length - 1], lp = last && proj(last.pos);
+      if (last) {
+        const d = hyp(last.pos[0] - rt.pos[0], last.pos[1] - rt.pos[1], last.pos[2] - rt.pos[2]) * 100, st = judge(d);
+        if (lp) { g.setLineDash([6, 6]); g.strokeStyle = COL[st]; g.lineWidth = 2; g.beginPath(); g.moveTo(lp[0], lp[1]); g.lineTo(c0[0], c0[1]); g.stroke(); g.setLineDash([]); }
+        pill(g, c0[0], c0[1] - 34, `${fmt(d)} cm`, COL[st], 1.25);
+      }
+    }
+    msg.className = 'pillmsg good';
+    msg.textContent = A.points.length ? '다음 말뚝 밑동에 원을 맞추고 화면을 누르세요. 숫자는 마지막 점부터의 거리입니다.' : '원을 첫 말뚝이 땅에 닿는 곳에 맞추고 화면을 누르세요.';
+  } else { msg.className = 'pillmsg wait'; msg.textContent = '폰을 천천히 움직여 바닥을 비춰 주세요.'; }
+  hudSum('ar', A.R, A.points.length);
+}
+$('btnAR').onclick = startAR;
+$('arHud').addEventListener('beforexrselect', (e) => e.preventDefault()); // buttons must not also place a point
+$('arAdd').onclick = () => { pendingAdd = true; };
+$('arAuto').onclick = () => { pendingAuto = true; };
+$('arUndo').onclick = () => { const p = A.points.pop(); if (p && p.anchor && p.anchor.delete) p.anchor.delete(); };
+$('arExit').onclick = () => { if (A.session) A.session.end().catch(() => endAR()); else endAR(); };
+
+/* ---------- start page ---------- */
+function setPressed(el, on) { el.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+function buildSwatches() {
+  const box = $('swatches'); box.textContent = '';
+  PRESETS.forEach(p => {
+    const b = document.createElement('button'); b.className = 'sw'; b.type = 'button';
+    const i = document.createElement('i'); i.style.background = p.sw; b.appendChild(i); b.appendChild(document.createTextNode(p.label));
+    setPressed(b, S.det.color === p.id);
+    b.onclick = () => { S.det.color = p.id; save(); buildSwatches(); };
+    box.appendChild(b);
+  });
+}
+function renderMain() {
+  const R = compute(S.results), st = R.stats;
+  $('resTitle').textContent = S.source ? `측정 결과 · ${S.source}` : '측정 결과';
+  $('stMean').textContent = st ? cm(st.mean) : '–'; $('stSd').textContent = st ? cm(st.sd) : '–'; $('stTotal').textContent = st ? cm(st.total) : '–';
+  $('stMin').textContent = st ? cm(st.min) : '–'; $('stMax').textContent = st ? cm(st.max) : '–'; $('stDev').textContent = st && st.n > 2 ? cm(st.dev) : '–';
+  const tb = $('tbody'); tb.textContent = '';
+  if (!R.segs.length) {
+    const tr = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 4; td.className = 'empty';
+    td.textContent = '아직 측정한 것이 없습니다. 위에서 측정을 시작하면 끝낸 뒤 결과가 여기에 남습니다.';
+    tr.appendChild(td); tb.appendChild(tr);
+  }
+  for (const s of R.segs) {
+    const tr = document.createElement('tr'); tr.className = s.st;
+    const diff = S.target > 0 ? s.d - S.target : null;
+    [`${s.from} → ${s.to}`, `${fmt(s.d)} cm`, diff === null ? '–' : `${diff >= 0 ? '+' : '−'}${Math.abs(diff).toFixed(1)}`,
+      s.st === 'ok' ? '적합' : s.st === 'bad' ? (diff > 0 ? '넓음' : '좁음') : '–'].forEach(t => { const td = document.createElement('td'); td.textContent = t; tr.appendChild(td); });
+    tb.appendChild(tr);
+  }
+  setPressed($('oLine'), S.order === 'line'); setPressed($('oPath'), S.order === 'path');
+  return R;
+}
+function num(el, fb) { const v = parseFloat(el.value); return isFinite(v) ? v : fb; }
+function syncInputs() {
+  $('tgt').value = S.target; $('tol').value = S.tol;
+  const sel = $('refSel');
+  if (!sel.options.length) REFS.forEach(r => { const o = document.createElement('option'); o.value = r.id; o.textContent = r.label; sel.appendChild(o); });
+  sel.value = S.ref.id; $('refW').value = S.ref.w; $('refH').value = S.ref.h;
+}
+$('tgt').oninput = () => { S.target = Math.max(0, num($('tgt'), 0)); save(); renderMain(); };
+$('tol').oninput = () => { S.tol = Math.max(0, num($('tol'), 0)); save(); renderMain(); };
+$('refSel').onchange = (e) => { const r = REFS.find(x => x.id === e.target.value); S.ref.id = r.id; if (r.w) { S.ref.w = r.w; S.ref.h = r.h; } save(); syncInputs(); };
+const onRef = () => { S.ref.w = num($('refW'), S.ref.w); S.ref.h = num($('refH'), S.ref.h); const r = REFS.find(x => x.w === S.ref.w && x.h === S.ref.h); S.ref.id = r ? r.id : 'custom'; $('refSel').value = S.ref.id; save(); };
+$('refW').oninput = onRef; $('refH').oninput = onRef;
+$('oLine').onclick = () => { S.order = 'line'; save(); renderMain(); };
+$('oPath').onclick = () => { S.order = 'path'; save(); renderMain(); };
+
+function stamp() { const d = new Date(), p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; }
+$('btnCopy').onclick = () => {
+  const R = compute(S.results), st = R.stats;
+  if (!st) { toast('복사할 측정 결과가 아직 없습니다.'); return; }
+  const lines = [`말뚝 간격 측정 (${S.results.length}개${S.target > 0 ? `, 목표 ${S.target} ±${S.tol} cm` : ''})`];
+  R.segs.forEach(s => lines.push(`${s.from}→${s.to}: ${fmt(s.d)} cm${S.target > 0 ? ` (${s.d - S.target >= 0 ? '+' : '−'}${Math.abs(s.d - S.target).toFixed(1)})` : ''}${s.st === 'bad' ? ' ●' : ''}`));
+  lines.push(`평균 ${fmt(st.mean)} / 최소 ${fmt(st.min)} / 최대 ${fmt(st.max)} cm`, `전체 길이 ${fmt(st.total)} cm`);
+  const t = lines.join('\n'), fb = $('copyFallback');
+  const fallback = () => { fb.hidden = false; fb.value = t; fb.focus(); fb.select(); toast('아래 글을 길게 눌러 복사하세요.'); };
+  try { navigator.clipboard.writeText(t).then(() => { fb.hidden = true; toast('결과를 복사했어요.'); }, fallback); } catch (e) { fallback(); }
+};
+$('btnCsv').onclick = () => {
+  const R = compute(S.results);
+  if (!R.segs.length) { toast('저장할 측정 결과가 아직 없습니다.'); return; }
+  const rows = ['구간,간격_cm,목표와_차이_cm,판정'];
+  R.segs.forEach(s => rows.push(`${s.from}-${s.to},${fmt(s.d)},${S.target > 0 ? (s.d - S.target).toFixed(1) : ''},${s.st === 'ok' ? '적합' : s.st === 'bad' ? '벗어남' : ''}`));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿' + rows.join('\r\n') + '\r\n'], { type: 'text/csv' })); a.download = `말뚝간격_${stamp()}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+};
+
+if (!window.isSecureContext) { $('insecure').hidden = false; $('lvState').textContent = 'https 주소에서만 카메라가 켜집니다.'; $('lvState').className = 'state no'; }
+syncInputs(); buildSwatches(); renderMain(); checkAR();
+window.__stake = { S, L, A, compute }; // for checking in a browser console
+})();
+</script>
+</body>
+</html>
