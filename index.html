@@ -167,7 +167,7 @@ details ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
       </label>
     </div>
     <div>
-      <p class="note" style="margin-bottom:6px">자동 인식할 말뚝·꽃심 색. ‘자동’은 화면에서 가장 눈에 띄는 색을 고릅니다. 목록에 없는 색(나무색, 흰색 등)은 측정 화면에서 말뚝을 눌러 알려 주세요.</p>
+      <p class="note" style="margin-bottom:6px">자동 인식할 대상. ‘강관’은 칠하지 않은 짙은 회색 강관 말뚝을 모양으로 찾습니다. ‘색 자동’은 화면에서 가장 눈에 띄는 색 표시를 찾습니다. 그 밖의 색은 측정 화면에서 말뚝을 눌러 알려 주세요.</p>
       <div class="swatches" id="swatches"></div>
       <label class="check" style="margin-top:10px"><input type="checkbox" id="cGroup"> 한 말뚝이 위아래 여러 조각으로 보이면 하나로 묶기</label>
     </div>
@@ -293,6 +293,7 @@ const PRESETS = [
   { id: 'pink', label: '분홍', hue: 325, sw: '#EC4FA7' },
   { id: 'yellow', label: '노랑', hue: 52, sw: '#F2D21B' },
   { id: 'blue', label: '파랑', hue: 212, sw: '#2F7BEA' },
+  { id: 'steel', label: '강관(짙은 회색)', steel: true, sw: '#4A5560' },
 ];
 const REFS = [
   { id: 'a4', label: 'A4 용지 (29.7 × 21 cm)', w: 29.7, h: 21 },
@@ -303,11 +304,11 @@ const REFS = [
 ];
 const S = {
   target: 30, tol: 2, order: 'line',
-  det: { color: 'auto', hueTol: 18, satMin: 45, custom: null, sens: 1, group: true },
+  det: { color: 'steel', hueTol: 18, satMin: 45, custom: null, sens: 1, group: true },
   ref: { id: 'a4', w: 29.7, h: 21 },
   results: [], source: '',
 };
-const KEY = 'stake-ar-settings-v2';
+const KEY = 'stake-ar-settings-v3';
 try {
   const o = JSON.parse(localStorage.getItem(KEY) || 'null');
   if (o) {
@@ -381,8 +382,9 @@ function learnColor(d, w, h, x, y) {
   R /= n; G /= n; B /= n;
   return Object.assign(rgb2hsv(R, G, B), { css: `rgb(${R | 0},${G | 0},${B | 0})` });
 }
+function isSteel() { return S.det.color === 'steel'; }
 function curPreset() { const d = S.det; return PRESETS.find(x => x.id === (d.color === 'auto' ? AUTO.pick : d.color)) || PRESETS[0]; }
-function colorName() { const d = S.det; return d.color === 'custom' && d.custom ? '찍은 색' : d.color === 'auto' ? `자동(${curPreset().label})` : curPreset().label; }
+function colorName() { const d = S.det; return d.color === 'custom' && d.custom ? '찍은 색' : d.color === 'auto' ? `색 자동(${curPreset().label})` : curPreset().label; }
 function colorCss() { const d = S.det; return d.color === 'custom' && d.custom ? d.custom.css : curPreset().sw; }
 // 4x4, column-major (WebXR / WebGL layout)
 function mul4(a, b) {
@@ -438,12 +440,21 @@ function buildMasks(d, w, h, wantPaper, presetId) {
   const det = S.det, sens = SENS[det.sens] ? SENS[det.sens].k : 1, cu = !presetId && det.color === 'custom' ? det.custom : null;
   const pid = presetId || (det.color === 'auto' ? AUTO.pick : det.color);
   const p = PRESETS.find(x => x.id === pid) || PRESETS[0], tol = det.hueTol * sens, satMin = clamp(det.satMin / 100 / sens, 0.15, 0.9), hue = p.hue;
-  const sT = 0.2 * sens, vT = 0.22 * sens, hT = cu ? (cu.s < 0.3 ? 30 : 18) * sens : 0;
+  const sT = 0.2 * sens, vT = 0.22 * sens, hT = cu ? (cu.s < 0.3 ? 30 : 18) * sens : 0, vSteel = Math.min(150, 115 * sens);
   for (let i = 0, j = 0; i < n; i++, j += 4) {
     const r = d[j], g = d[j + 1], b = d[j + 2];
     const mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b), dd = mx - mn;
     const s = mx ? dd / mx : 0;
     if (wantPaper) { V[i] = mx; Sa[i] = s * 255; hist[mx]++; }
+    if (p.steel && !cu) {
+      if (mx < 20 || mx > vSteel) continue;
+      if (s < 0.12) { mk[i] = 1; continue; }
+      if (s > 0.5 || !dd) continue;
+      let hs; if (mx === r) hs = ((g - b) / dd) % 6; else if (mx === g) hs = (b - r) / dd + 2; else hs = (r - g) / dd + 4;
+      hs *= 60; if (hs < 0) hs += 360;
+      if (hs >= 165 && hs <= 265) mk[i] = 1;
+      continue;
+    }
     if (cu) { // learned colour: match saturation and brightness too, so wood can be told from soil
       if (Math.abs(s - cu.s) > sT || Math.abs(mx / 255 - cu.v) > vT) continue;
       if (cu.s < 0.15) { mk[i] = 1; continue; }
@@ -468,7 +479,8 @@ const labBuf = { lab: null, q: null, n: 0 };
 function labBufs(n) { if (labBuf.n !== n) { labBuf.lab = new Int32Array(n); labBuf.q = new Int32Array(n); labBuf.n = n; } else labBuf.lab.fill(0); return labBuf; }
 /* Finds marker-coloured objects and the point where each one stands on the ground.
    A thin stake is measured at its lower end; an object on a round base plate at the plate's centre. */
-function findStakes(mk, w, h, minDiam, excl) {
+function findStakes(mk, w, h, minDiam, excl, columns) {
+  if (columns) return findColumns(mk, w, h, minDiam, excl);
   const m = boxOp(boxOp(mk, w, h, 1, true), w, h, 1, false);
   const { lab, q } = labBufs(w * h);
   const minArea = Math.PI * minDiam * minDiam / 4, maxArea = w * h * 0.3;
@@ -515,17 +527,90 @@ function findStakes(mk, w, h, minDiam, excl) {
     const base = kept.find(k => {
       const ov = Math.min(b.maxX, k.maxX) - Math.max(b.minX, k.minX) + 1, nw = Math.min(b.maxX - b.minX, k.maxX - k.minX) + 1;
       if (ov >= 0.6 * nw && (k.top - b.maxY) < 0.9 * Math.max(k.maxY - k.top, b.maxY - b.minY)) return true; // stacked part
-      return b.minY >= k.top - 2 && b.maxY <= k.maxY && -ov < 0.3 * (k.maxX - k.minX + 1); // piece beside it (cut off by a bar etc.)
+      return b.minY >= k.top - 0.1 * (k.maxY - k.top) && b.maxY <= k.maxY && -ov < 0.3 * (k.maxX - k.minX + 1); // piece beside it (cut off by a bar etc.)
     });
     if (base) { base.area += b.area; base.top = Math.min(base.top, b.minY); base.minX = Math.min(base.minX, b.minX); base.maxX = Math.max(base.maxX, b.maxX); }
     else kept.push(b);
   }
   return kept;
 }
+/* Upright pipes (bare steel): keep only what stands taller than it is wide, so a fence, a hose or
+   stacked pipes running across the picture do not glue themselves to a pile. */
+function findColumns(mk, w, h, minDiam, excl) {
+  let m = boxOp(boxOp(mk, w, h, 1, true), w, h, 1, false);
+  const n = w * h, rv = Math.max(2, Math.round(h * 0.012));
+  { // vertical closing: bridge joint rings and paint marks across the pipe
+    const t = new Uint8Array(n), o = new Uint8Array(n), ps = new Int32Array(h + 1);
+    for (let pass = 0; pass < 2; pass++) {
+      const src = pass ? t : m, dst = pass ? o : t;
+      for (let x = 0; x < w; x++) {
+        for (let y = 0; y < h; y++) ps[y + 1] = ps[y] + src[y * w + x];
+        for (let y = 0; y < h; y++) { const a = Math.max(0, y - rv), b = Math.min(h - 1, y + rv), sm = ps[b + 1] - ps[a]; dst[y * w + x] = pass ? (sm === b - a + 1 ? 1 : 0) : (sm > 0 ? 1 : 0); }
+      }
+    }
+    for (let i = 0; i < n; i++) if (m[i]) o[i] = 1;
+    m = o;
+  }
+  const VR = new Uint16Array(n), HR = new Uint16Array(n);
+  for (let x = 0; x < w; x++) { // length of the vertical run through each pixel
+    let y = 0;
+    while (y < h) { if (!m[y * w + x]) { y++; continue; } let e = y; while (e < h && m[e * w + x]) e++; const L = Math.min(65535, e - y); for (let k = y; k < e; k++) VR[k * w + x] = L; y = e; }
+  }
+  for (let y = 0; y < h; y++) { // and of the horizontal run
+    let x = 0; const o = y * w;
+    while (x < w) { if (!m[o + x]) { x++; continue; } let e = x; while (e < w && m[o + e]) e++; const L = Math.min(65535, e - x); for (let k = x; k < e; k++) HR[o + k] = L; x = e; }
+  }
+  for (let i = 0; i < n; i++) if (m[i] && VR[i] < 1.5 * HR[i]) m[i] = 0;
+
+  const { lab, q } = labBufs(n);
+  const minArea = Math.PI * minDiam * minDiam / 4;
+  const rowMin = new Int32Array(h), rowMax = new Int32Array(h), rowStamp = new Int32Array(h);
+  let parts = [], nl = 0;
+  for (let s0 = 0; s0 < n; s0++) {
+    if (!m[s0] || lab[s0]) continue;
+    nl++; let head = 0, tail = 0; q[tail++] = s0; lab[s0] = nl;
+    let sx = 0, sy = 0, minY = 1e9, maxY = -1, minX = 1e9, maxX = -1;
+    while (head < tail) {
+      const p = q[head++], x = p % w, y = (p - x) / w;
+      sx += x; sy += y; if (y < minY) minY = y; if (y > maxY) maxY = y; if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (rowStamp[y] !== nl) { rowStamp[y] = nl; rowMin[y] = x; rowMax[y] = x; } else { if (x < rowMin[y]) rowMin[y] = x; if (x > rowMax[y]) rowMax[y] = x; }
+      if (x > 0 && m[p - 1] && !lab[p - 1]) { lab[p - 1] = nl; q[tail++] = p - 1; }
+      if (x < w - 1 && m[p + 1] && !lab[p + 1]) { lab[p + 1] = nl; q[tail++] = p + 1; }
+      if (y > 0 && m[p - w] && !lab[p - w]) { lab[p - w] = nl; q[tail++] = p - w; }
+      if (y < h - 1 && m[p + w] && !lab[p + w]) { lab[p + w] = nl; q[tail++] = p + w; }
+    }
+    const area = tail;
+    if (area < minArea) continue;
+    if (excl && pip([sx / area, sy / area], excl)) continue;
+    const ws = []; let sum = 0;
+    for (let y = minY; y <= maxY; y++) { const wd = rowMax[y] - rowMin[y] + 1; ws.push(wd); sum += wd; }
+    ws.sort((a2, b2) => a2 - b2);
+    const wm = ws[ws.length >> 1];
+    if (area < 0.6 * sum || ws[(ws.length * 0.9) | 0] > 2.2 * wm) continue; // ragged or branching: not a pipe
+    const band = Math.max(1.5, (maxY - minY) * 0.04); let bx = 0, bn = 0;
+    for (let t = 0; t < tail; t++) { const p = q[t]; if (((p / w) | 0) >= maxY - band) { bx += p % w; bn++; } }
+    parts.push({ x: bx / bn + 0.5, y: maxY + 0.8, area, minX, maxX, minY, maxY, top: minY, wm, round: false, fill: area / sum, sum });
+  }
+  parts.sort((a, b) => b.maxY - a.maxY); // lowest piece first: that is where the pipe meets the ground
+  const kept = [];
+  for (const b of parts) {
+    const base = kept.find(k => {
+      const ov = Math.min(b.maxX, k.maxX) - Math.max(b.minX, k.minX) + 1, nw = Math.min(b.maxX - b.minX, k.maxX - k.minX) + 1;
+      return ov >= 0.6 * nw && (k.top - b.maxY) < 0.15 * (k.maxY - b.minY) && b.wm < 1.8 * k.wm && k.wm < 1.8 * b.wm;
+    });
+    if (base) { base.area += b.area; base.top = Math.min(base.top, b.minY); base.minX = Math.min(base.minX, b.minX); base.maxX = Math.max(base.maxX, b.maxX); base.wm = Math.max(base.wm, b.wm); base.sum += b.sum; base.fill = base.area / base.sum; }
+    else kept.push(b);
+  }
+  const cols = kept.filter(k => k.maxY - k.top + 1 >= 2.5 * k.wm && k.fill >= 0.8);
+  // keep the pipes that stand out; short dark things (legs, fence posts, far clutter) fall away
+  const tall = Math.max(0, ...cols.map(k => k.maxY - k.top + 1)), rel = [0.45, 0.35, 0.18][S.det.sens] || 0.35;
+  return cols.filter(k => k.maxY - k.top + 1 >= tall * rel);
+}
 /* Automatic colour: the preset that currently shows the most (and at least two) sizeable objects. */
 function pickAuto(d, w, h, minDiam) {
   let best = null, bs = 0, cur = 0;
   for (const p of PRESETS) {
+    if (p.steel) continue;
     const r = findStakes(buildMasks(d, w, h, false, p.id).mk, w, h, minDiam, null);
     const tot = r.reduce((a, o) => a + o.area, 0), sc = r.length >= 2 ? tot : tot * 0.3;
     if (p.id === AUTO.pick) cur = sc;
@@ -842,7 +927,7 @@ function processLive() {
   if (S.det.color === 'auto' && AUTO.tick++ % 10 === 0) pickAuto(d, w, h, 3.5);
   const { mk, paper } = buildMasks(d, w, h, true);
 
-  const objs = findStakes(mk, w, h, 3.5, null);
+  const objs = findStakes(mk, w, h, 3.5, null, isSteel());
   const coarse = findPaper(paper, w, h, mk, objs);
   if (coarse) {
     let q = coarse.map(p => [p[0] / k, p[1] / k]); // video pixels
@@ -1071,7 +1156,7 @@ function arFrame(t, frame) {
 function arCamDetect(view) {
   const cam = view.camera; if (!cam || !A.binding) return;
   const tex = A.binding.getCameraImage(cam); if (!tex) return;
-  const gl = A.gl, dw = 384, dh = Math.max(16, Math.round(384 * cam.height / cam.width));
+  const gl = A.gl, dw = 480, dh = Math.max(16, Math.round(480 * cam.height / cam.width));
   if (!A.prog) {
     const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
     const pr = gl.createProgram();
@@ -1104,7 +1189,7 @@ function arCamDetect(view) {
   }
   if (S.det.color === 'auto' && AUTO.tick++ % 4 === 0) pickAuto(A.img, dw, dh, 3);
   const { mk } = buildMasks(A.img, dw, dh, false);
-  const dets = findStakes(mk, dw, dh, 3, null);
+  const dets = findStakes(mk, dw, dh, 3, null, isSteel());
   const inv = inv4(mul4(view.projectionMatrix, view.transform.inverse.matrix));
   const out = [];
   if (inv) for (const d of dets) {
@@ -1164,7 +1249,7 @@ function drawAR(view) {
     }
     msg.className = 'pillmsg good';
     msg.textContent = fresh.length ? `말뚝 ${fresh.length}개를 찾아 선으로 이었어요. ‘인식된 ${fresh.length}개 고정’을 누르면 움직여도 남습니다.`
-      : A.points.length ? '다음 말뚝 밑동에 원을 맞추고 화면을 누르세요. 숫자는 마지막 점부터의 거리입니다.' : (A.cam ? '말뚝들이 화면에 들어오게 비추면 자동으로 찾습니다. 직접 찍으려면 원을 밑동에 맞추고 화면을 누르세요.' : '원을 첫 말뚝이 땅에 닿는 곳에 맞추고 화면을 누르세요.');
+      : A.points.length ? '다음 말뚝 밑동에 원을 맞추고 화면을 누르세요. 숫자는 마지막 점부터의 거리입니다.' : (A.cam ? '말뚝들이 화면에 들어오게 비추면 자동으로 찾습니다. 직접 찍으려면 원을 밑동에 맞추고 화면을 누르세요.' : '이 폰은 AR 중 자동 인식이 안 됩니다. 원을 말뚝 밑동에 맞추고 화면을 눌러 직접 찍어 주세요.');
   } else { msg.className = 'pillmsg wait'; msg.textContent = '폰을 천천히 움직여 바닥을 비춰 주세요.'; }
   $('arSw').style.background = colorCss(); $('arColor').textContent = colorName(); $('arSens').textContent = `인식 범위 ${SENS[S.det.sens].label}`;
   hudSum('ar', A.R, all.length);
@@ -1184,7 +1269,7 @@ function buildSwatches() {
   const box = $('swatches'); box.textContent = '';
   {
     const b = document.createElement('button'); b.className = 'sw'; b.type = 'button';
-    const i = document.createElement('i'); i.style.background = 'conic-gradient(#f33,#fd3,#3be,#e4d,#f33)'; b.appendChild(i); b.appendChild(document.createTextNode('자동'));
+    const i = document.createElement('i'); i.style.background = 'conic-gradient(#f33,#fd3,#3be,#e4d,#f33)'; b.appendChild(i); b.appendChild(document.createTextNode('색 자동'));
     setPressed(b, S.det.color === 'auto');
     b.onclick = () => { S.det.color = 'auto'; save(); buildSwatches(); };
     box.appendChild(b);
